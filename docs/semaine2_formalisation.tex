@@ -1,0 +1,104 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage{iftex}
+\ifPDFTeX
+  \usepackage[utf8]{inputenc}
+  \usepackage[T1]{fontenc}
+\fi
+\usepackage[french]{babel}
+\usepackage{amsmath,amssymb,mathtools}
+\usepackage{geometry}
+\geometry{margin=2.2cm}
+\usepackage{booktabs}
+\usepackage{enumitem}
+
+\title{\textbf{Formalisation mathématique et instances}}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section{Notation}
+\begin{itemize}[leftmargin=*,itemsep=2pt,label={\textbullet}]
+  \item $E$ : ensemble des étudiants ;
+  \item $t \in \{\mathrm{LV2}, \mathrm{LV1}, \mathrm{TP}, \mathrm{TD}\}$ : type de groupes, $G(t)$ : groupes de type $t$, $C(g)$ : capacité du groupe $g$ ;
+  \item $s(e)$ : LV2 choisie par l'étudiant $e$ ; $P(g)$ : parent hiérarchique de $g$ (TP $\to$ TD $\to$ PROMO) ;
+  \item $N(t)$ : effectif à répartir de type $t$ ; $k(t)$ : nombre de groupes de type $t$ ouverts ; $R(t)$ : salles utilisables simultanément.
+\end{itemize}
+
+\section{Variables}
+\[
+x(e,g) \in \{0,1\} \text{ : affectation de } e \text{ au groupe } g,
+\qquad
+y(g) \in \{0,1\} \text{ : groupe } g \text{ ouvert},
+\]
+\[
+n(g) = \sum_{e \in E} x(e,g) \text{ : effectif de } g.
+\]
+
+\section{Contraintes dures}
+\begin{align}
+  &\text{(C1)} \quad \forall e \in E,\ \forall t : \sum_{g \in G(t)} x(e,g) = 1
+    &&\text{un seul groupe par type,}\notag\\
+  &\text{(C2)} \quad \forall g : n(g) \le C(g)
+    &&\text{effectif maximal,}\notag\\
+  &\text{(C3)} \quad x(e,g) = 0 \ \text{si } g \text{ incompatible avec } s(e)
+    &&\text{respect de } s(e)\text{ (césure, redoublant),}\notag\\
+  &\text{(C4)} \quad \forall e,\ \forall g \in G(\mathrm{TP}) : x(e,g) \le x(e, P(g))
+    &&\text{cohérence hiérarchique.}\notag
+\end{align}
+
+\section{Contraintes souples}
+Les critères sont agrégés en une fonction objectif unique :
+\begin{align}
+  f_1 &= \sum_{t} \sum_{g \in G(t)} \left| n(g) - \frac{N(t)}{k(t)} \right|
+    && \text{équilibre des effectifs,}\notag\\
+  f_2 &= \sum_{g} y(g)
+    && \text{nombre de groupes ouverts,}\notag\\
+  f_3 &= \sum_{t} \left\lceil \frac{k(t)}{R(t)} \right\rceil
+    && \text{parallélisation,}\notag\\
+  f_4 &= \text{robustesse au changement}
+    && \text{semaine 6 (hors statique).}\notag
+\end{align}
+
+\section{Fonction objectif unique}
+\begin{equation}
+  \min_{x,y} \ \sum_{c} w(c)\, f(c),
+  \qquad f(c) \in [0,1],\quad w(c) \ge 0,\quad \sum_{c} w(c) = 1,
+\end{equation}
+les $f(c)$ étant normalisées dans $[0,1]$ : normalisation indispensable, les critères n'ont pas les mêmes unités.
+
+\section{Justification de l'agrégation}
+Les poids $w$ sont paramétrés, non fixés arbitrairement : utilisés uniformes aux semaines~4-5, ils seront appris aux semaines~6-8 par \emph{inverse optimization} (« apprentissage par imitation » de l'affectation manuelle). L'agrégation est donc justifiée par la mesure, pas par déclaration.
+
+\section{Générateur d'instances synthétiques}
+\textbf{Paramètres.}
+\begin{itemize}[leftmargin=2em,itemsep=1pt,topsep=2pt,label={\textbullet}]
+  \item effectif $n \in [50,100]$ (bornes du cadrage, vérifiées par assertion) et graine ;
+  \item distribution de LV2 (défaut : Allemand 45\,\%, Espagnol 20\,\%, Autre 35\,\%) ;
+  \item capacités calées sur les données réelles : LV1 : 21, TP : 16, TD : 36 ;
+  \item part de choix de LV2 pris le jour de la rentrée : 15\,\% ;
+  \item cas particuliers : césure, 4 redoublants.
+\end{itemize}
+
+\textbf{Sortie.} Liste d'étudiants (id, LV2, choix tardif, statut) et proposition de groupes (nom, type, capacité, parent pour les TP), soit l'entrée directe du modèle CP-SAT.
+
+\section{Tests du générateur (seed 42)}
+\begin{center}
+{\small\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lccc}
+\toprule
+Effectif $n$ & Répartition LV2 (All.\ / Esp.\ / Autre) & Groupes LV2 / LV1 / TP / TD & Choix tardifs \\
+\midrule
+50 & 23 / 8 / 19 & 5 / 3 / 4 / 2 & 8 \\
+75 & 35 / 13 / 27 & 5 / 4 / 5 / 3 & 10 \\
+80 (référence) & 39 / 13 / 28 & 5 / 4 / 5 / 3 & 10 \\
+100 & 50 / 15 / 35 & 5 / 5 / 7 / 3 & 14 \\
+\bottomrule
+\end{tabular}}
+\end{center}
+
+Les cas particuliers sont ajoutés à partir de $n \ge 60$ (instance $n = 50$ : aucun). Le générateur est documenté et prêt à être remis avec les scripts commentés.
+
+\end{document}
