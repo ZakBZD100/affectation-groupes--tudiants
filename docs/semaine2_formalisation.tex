@@ -1,0 +1,117 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage{iftex}
+\ifPDFTeX
+  \usepackage[utf8]{inputenc}
+  \usepackage[T1]{fontenc}
+\fi
+\usepackage[french]{babel}
+\usepackage{amsmath,amssymb,mathtools}
+\usepackage{geometry}
+\geometry{margin=2.2cm}
+\usepackage{booktabs}
+\usepackage{enumitem}
+
+\title{\textbf{Formalisation mathématique et instances}}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section{Notation}
+\begin{itemize}[leftmargin=*,itemsep=2pt,label={\textbullet}]
+  \item $E$ : ensemble des étudiants ;
+  \item $t \in \{\mathrm{LV2}, \mathrm{LV1}, \mathrm{TP}, \mathrm{TD}\}$ : type de groupes, $G(t)$ : groupes de type $t$, $C(g)$ : capacité du groupe $g$ ;
+  \item $s(e)$ : LV2 choisie par l'étudiant $e$ ; $P(g)$ : parent hiérarchique de $g$ (TP $\to$ TD $\to$ PROMO) ;
+  \item $N(t)$ : effectif à répartir de type $t$ ; $k(t)$ : nombre de groupes de type $t$ que l'établissement ouvre (donnée fixée avant l'optimisation, contrainte dure).
+\end{itemize}
+
+\section{Variables}
+\[
+x(e,g) \in \{0,1\} \text{ : affectation de } e \text{ au groupe } g,
+\qquad
+y(g) \in \{0,1\} \text{ : groupe } g \text{ ouvert},
+\]
+\[
+n(g) = \sum_{e \in E} x(e,g) \text{ : effectif de } g.
+\]
+
+\section{Contraintes dures}
+\begin{align}
+  &\text{(C1)} \quad \forall e \in E,\ \forall t : \sum_{g \in G(t)} x(e,g) = 1
+    &&\text{un seul groupe par type,}\notag\\
+  &\text{(C2)} \quad \forall g : n(g) \le C(g)
+    &&\text{effectif maximal,}\notag\\
+  &\text{(C3)} \quad x(e,g) = 0 \ \text{si } g \text{ incompatible avec } s(e)
+    &&\text{respect de } s(e)\text{ (césure, redoublant),}\notag\\
+  &\text{(C4)} \quad \forall e,\ \forall g \in G(\mathrm{TP}) : x(e,g) \le x(e, P(g))
+    &&\text{cohérence hiérarchique.}\notag
+\end{align}
+\begin{align}
+  &\text{(C5)} \quad \forall t : \sum_{g \in G(t)} y(g) = k(t)
+    &&\text{exactement $k(t)$ groupes ouverts,}\notag\\
+  &\text{(C6)} \quad \forall g : n(g) \le C(g)\, y(g)
+    &&\text{aucune place dans un groupe fermé,}\notag\\
+  &\text{(C7)} \quad \forall g : y(g) \le n(g)
+    &&\text{un groupe ouvert accueille au moins un étudiant.}\notag
+\end{align}
+L'ordre des décisions est structurel : C5 fixe la structure (combien de groupes), C1 à C3 et C7 placent les étudiants, $f_1$ n'optimise qu'à l'intérieur de cette structure. La faisabilité (dur) prime sur la qualité (souple).
+
+\section{Contraintes souples}
+Seul le critère de qualité reste souple, une fois la structure fixée par C5 :
+\begin{align}
+  f_1 &= \sum_{t} \sum_{g \in G(t)} \frac{\left| n(g) - \frac{N(t)}{k(t)} \right|}{\frac{N(t)}{k(t)}}
+    && \text{équilibre relatif,}\notag\\
+  f_4 &= \text{robustesse au changement}
+    && \text{semaine 6 (hors statique).}\notag
+\end{align}
+La déviation est \emph{relative} (divisée par la cible $N(t)/k(t)$) : un étudiant de trop pèse 20\,\% sur un TP de 5 mais 3\,\% sur un TD de 36, les types deviennent comparables.
+Correspondance avec la version initiale : l'ancien $f_2$ (nombre de groupes ouverts) est devenu la contrainte dure C5 ; l'ancien $f_3$ (parallélisation) n'est plus un critère, la schedulabilité est portée par le choix de $k(t)$ en donnée d'entrée.
+
+\section{Fonction objectif unique}
+\begin{equation}
+  \min_{x,y} \ \sum_{c} w(c)\, f(c),
+  \qquad f(c) \in [0,1],\quad w(c) \ge 0,\quad \sum_{c} w(c) = 1,
+\end{equation}
+les $f(c)$ étant normalisées dans $[0,1]$. Pour $f_1$, les bornes sont calculables : pire cas $f_1^{\max} = 2 N(t) (k(t)-1)$ (tous les étudiants dans un seul groupe), meilleur cas atteignable $f_1^{\min} = 2 r (k(t) - r)$ avec $r = N(t) \bmod k(t)$ (l'indivisibilité des étudiants empêche zéro), d'où
+\[
+  \tilde f_1 = \frac{f_1 - f_1^{\min}}{f_1^{\max} - f_1^{\min}} \in [0,1].
+\]
+Exemples : $N=12$, $k=3$ : $f_1^{\max} = 48$, la répartition $12/0/0$ coûte 48 et $4/4/4$ coûte 0 ; $N=10$, $k=3$ : $f_1^{\min} = 4$, réalisée par $4/3/3$. La normalisation est nécessaire car les critères n'ont pas les mêmes unités (écarts d'étudiants, nombres de groupes) : sans elle, $f_1$ écraserait les autres dans la somme pondérée et les poids $w(c)$ perdraient leur sens de taux d'échange.
+Implémentation CP-SAT : on minimise $\sum_g |k(t)\, n(g) - N(t)|$, forme entière équivalente (même minimiseur, sans flottants).
+
+\section{Justification de l'agrégation}
+Les poids $w$ sont paramétrés, non fixés arbitrairement : utilisés uniformes aux semaines~4-5, ils seront appris aux semaines~6-8 par \emph{inverse optimization} (« apprentissage par imitation » de l'affectation manuelle). L'agrégation est donc justifiée par la mesure, pas par déclaration.
+
+\section{Générateur d'instances synthétiques}
+\textbf{Paramètres.}
+\begin{itemize}[leftmargin=2em,itemsep=1pt,topsep=2pt,label={\textbullet}]
+  \item effectif $n \in [50,100]$ (bornes du cadrage, vérifiées par assertion) et graine ;
+  \item distribution de LV2 (défaut : Allemand 45\,\%, Espagnol 20\,\%, Autre 35\,\%) ;
+  \item capacités calées sur les données réelles : LV1 : 21, TP : 16, TD : 36 ;
+  \item part de choix de LV2 pris le jour de la rentrée : 15\,\% ;
+  \item cas particuliers : césure, 4 redoublants ;
+  \item jeu étendu : effectifs tirés selon une loi normale $\mathcal{N}(64, 10)$ tronquée aux bornes $[50,100]$ (taille moyenne de promo), parts de LV2 bruitées gaussiennement puis renormalisées (graines fixées, reproductible).
+\end{itemize}
+
+\textbf{Sortie.} Liste d'étudiants (id, LV2, choix tardif, statut) et proposition de groupes (nom, type, capacité, parent pour les TP), soit l'entrée directe du modèle CP-SAT.
+
+\section{Tests du générateur (seed 42)}
+\begin{center}
+{\small\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lccc}
+\toprule
+Effectif $n$ & Répartition LV2 (All.\ / Esp.\ / Autre) & Groupes LV2 / LV1 / TP / TD & Choix tardifs \\
+\midrule
+50 & 23 / 8 / 19 & 5 / 3 / 4 / 2 & 8 \\
+75 & 35 / 13 / 27 & 5 / 4 / 5 / 3 & 10 \\
+80 (référence) & 39 / 13 / 28 & 5 / 4 / 5 / 3 & 10 \\
+100 & 50 / 15 / 35 & 5 / 5 / 7 / 3 & 14 \\
+\bottomrule
+\end{tabular}}
+\end{center}
+
+Les cas particuliers sont ajoutés à partir de $n \ge 60$ (instance $n = 50$ : aucun). Le générateur est documenté et prêt à être remis avec les scripts commentés.
+
+\end{document}

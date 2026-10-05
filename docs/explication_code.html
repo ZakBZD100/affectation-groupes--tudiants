@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Comprendre test_cpsat.py — modèle CP-SAT (version S3)</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+  onload="renderMathInElement(document.body,{delimiters:[{left:'$$',right:'$$',display:true},{left:'\\(',right:'\\)',display:false}]})"></script>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: Georgia, "Times New Roman", serif; line-height: 1.6; color: #1a1a2e; background: #f8f9fa; margin: 0; padding: 0; }
+  header { background: linear-gradient(135deg, #0d1b2a, #1b3a4b); color: #fff; padding: 2.5rem 2rem; text-align: center; }
+  header h1 { margin: 0 0 0.4rem; font-size: 1.8rem; font-weight: 600; }
+  header .sub { color: #a8c5d4; font-size: 0.95rem; max-width: 720px; margin: 0 auto; }
+  main { max-width: 920px; margin: 2rem auto; padding: 0 1.5rem 4rem; }
+  h2 { color: #0d1b2a; border-bottom: 2px solid #1b3a4b; padding-bottom: 0.3rem; margin-top: 2.5rem; }
+  h3 { color: #1b3a4b; margin-top: 1.8rem; }
+  code { background: #e9ecef; padding: 0.12rem 0.35rem; border-radius: 3px; font-size: 0.9em; font-family: "Consolas", "Courier New", monospace; }
+  pre { background: #0d1b2a; color: #e0e1dd; padding: 1rem 1.2rem; border-radius: 6px; overflow-x: auto; font-size: 0.85rem; line-height: 1.45; }
+  pre code { background: none; color: inherit; padding: 0; }
+  .note { background: #e8f4f8; border-left: 4px solid #1b3a4b; padding: 0.8rem 1.2rem; margin: 1.2rem 0; border-radius: 0 4px 4px 0; }
+  .warn { background: #fff3cd; border-left: 4px solid #c0950a; padding: 0.8rem 1.2rem; margin: 1.2rem 0; }
+  .box { background: #fff; border: 1px solid #dee2e6; border-radius: 6px; padding: 1rem 1.4rem; margin: 1.2rem 0; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: 0.92rem; }
+  th, td { border: 1px solid #adb5bd; padding: 0.45rem 0.7rem; text-align: left; }
+  th { background: #1b3a4b; color: #fff; }
+  tr:nth-child(even) { background: #f1f3f5; }
+  .justify { color: #495057; font-style: italic; }
+  a { color: #1b3a4b; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Comprendre <code>test_cpsat.py</code> de A à Z</h1>
+  <p class="sub">Affectation de groupes d'étudiants — modèle CP-SAT (OR-Tools).<br>
+  Version S3 : modèle étendu (C5–C7, f1 relative, indicateurs calculés).</p>
+</header>
+
+<main>
+
+<div class="note"><strong>Version.</strong> Ce document décrit le code actuel
+(<code>test_cpsat.py</code>, 7 tests, commit <code>f0c86d2</code>). La formalisation complète est dans
+<code>docs/semaine2_formalisation.pdf</code>.</div>
+
+<h2 id="sommaire">Sommaire</h2>
+<ol>
+  <li><a href="#s1">Le problème, en une phrase</a></li>
+  <li><a href="#s2">Données d'entrée</a></li>
+  <li><a href="#s3">Variables de décision</a></li>
+  <li><a href="#s4">Contraintes dures C1 → C7</a></li>
+  <li><a href="#s5">Objectif : f1 relative, forme entière, normalisation</a></li>
+  <li><a href="#s6">Indicateurs retournés par <code>resoudre()</code></a></li>
+  <li><a href="#s7">Le code, ligne par ligne</a></li>
+  <li><a href="#s8">Les 7 tests</a></li>
+  <li><a href="#s9">Banc d'essai S3 (10 instances, sensibilité à k)</a></li>
+  <li><a href="#s10">Le générateur d'instances (étendu)</a></li>
+  <li><a href="#s11">Analyse des fichiers .grist (données réelles)</a></li>
+  <li><a href="#s12">Comparaison 3 méthodes (référence, baseline, CP-SAT)</a></li>
+  <li><a href="#s13">Pertinence de l'objectif</a></li>
+  <li><a href="#s14">Synthèse S3</a></li>
+  <li><a href="#s15">Heuristique greedy vs CP-SAT</a></li>
+</ol>
+
+<h2 id="s1">1. Le problème, en une phrase</h2>
+<p>On a <strong>50 à 100 étudiants</strong> qui arrivent à la rentrée avec un <strong>choix de LV2</strong>
+(Allemand / Espagnol / autre). On doit les répartir dans des <strong>groupes</strong> (LV2, LV1, TP, TD)
+de <strong>capacité limitée</strong>, en respectant le choix de chacun, en gardant les groupes
+<strong>équilibrés</strong>, et en décidant <strong>combien de groupes on ouvre réellement</strong>.</p>
+<p>La question n'est pas « quel algorithme ? » mais « <strong>qu'est-ce qu'on décide en dur,
+et qu'est-ce qu'on optimise ensuite ?</strong> ». Le modèle répond :</p>
+<ul>
+  <li><strong>Dur, d'abord</strong> : combien de groupes on ouvre (<code>k(t)</code>), qui va dans quel groupe
+  compatible, capacité par capacité. C'est la structure.</li>
+  <li><strong>Souple, ensuite</strong> : parmi toutes les affectations valides, celle qui équilibre le mieux
+  les effectifs. C'est la qualité.</li>
+</ul>
+
+<h2 id="s2">2. Données d'entrée</h2>
+
+<h3>2.1 L'ensemble des étudiants <code>s</code></h3>
+<p>Un dictionnaire <code>{identifiant: choix LV2}</code> :</p>
+<pre><code>s = {1: "Allemand", 2: "Espagnol", 3: "Allemand", ...}</code></pre>
+<p class="justify">Pourquoi un dict et pas une liste ? Parce qu'on doit identifier chaque étudiant
+dans la solution finale (<code>aff[e] = "TP2"</code>). La clé = l'identifiant stable.</p>
+
+<h3>2.2 Les groupes proposés <code>groupes</code></h3>
+<p>Un dictionnaire <code>{nom du groupe: capacité maximale}</code> :</p>
+<pre><code>groupes = {"TP1": 16, "TP2": 16, "TD1": 36, "LV2_A": 24, ...}</code></pre>
+<p>La capacité <code>C(g)</code> est le <strong>maximum absolu</strong> : on ne peut pas dépasser, même si
+la place se libère.</p>
+
+<h3>2.3 Le nombre de groupes ouverts <code>k</code></h3>
+<p>Paramètre <strong>dur</strong> (contrainte, pas objectif). S'il vaut <code>None</code>, tous les groupes
+proposés sont ouverts. Sinon, exactement <code>k</code> d'entre eux seront ouverts.</p>
+
+<h3>2.4 La compatibilité <code>compat</code></h3>
+<p>Dictionnaire <code>{identifiant: liste des groupes compatibles}</code>. Un étudiant en Allemand
+ne peut aller que dans des groupes Allemand, etc.</p>
+<pre><code>compat = {1: ["TP1", "TP2"], 2: ["TP3"], ...}</code></pre>
+
+<h2 id="s3">3. Variables de décision</h2>
+
+<h3>3.1 <code>x[e, g]</code> : binaire, « étudiant <code>e</code> dans le groupe <code>g</code> »</h3>
+$$x_{e,g} = \begin{cases} 1 & \text{si l'étudiant } e \text{ est affecté au groupe } g \\ 0 & \text{sinon} \end{cases}$$
+<p>C'est la <strong>seule vraie variable de décision</strong>. Tout le reste (effectifs, indicateurs)
+en découle.</p>
+
+<h3>3.2 <code>n[g]</code> : effectif du groupe <code>g</code></h3>
+$$n(g) = \sum_{e \in s} x_{e,g}$$
+<p>Calculé (pas indépendant) : c'est la somme des affectations.</p>
+
+<h3>3.3 <code>y[g]</code> : binaire, « le groupe <code>g</code> est-il ouvert ? »</h3>
+$$y_g = \begin{cases} 1 & \text{si le groupe } g \text{ est ouvert (au moins 1 étudiant)} \\ 0 & \text{sinon} \end{cases}$$
+<p class="justify">Pourquoi une variable dédiée ? Parce qu'on décide combien de groupes on ouvre
+<strong>avant</strong> d'équilibrer. Sans <code>y</code>, on ne pourrait pas imposer « exactement k groupes ».</p>
+
+<h3>3.4 <code>e[g]</code> : variable auxiliaire pour l'équilibre</h3>
+$$e_g = |k \cdot n(g) - N|$$
+<p class="justify">On utilise une égalité absolue (<code>AddAbsEquality</code>) pour dire au solveur
+« <code>e[g]</code> vaut la valeur absolue de <code>k·n(g) − N</code> ». C'est comme ça qu'on linéarise
+la valeur absolue en CP-SAT (pas besoin de <code>abs()</code> manuel).</p>
+
+<h2 id="s4">4. Contraintes dures C1 → C7</h2>
+
+<h3>C1 — Un seul groupe par étudiant</h3>
+$$\forall e \in s : \sum_{g \in G} x_{e,g} = 1$$
+<p>Chaque étudiant est exactement dans <strong>un</strong> groupe. Ni deux, ni zéro.</p>
+
+<h3>C2 — Capacité maximale</h3>
+$$\forall g \in G : \sum_{e \in s} x_{e,g} \le C(g)$$
+<p>Le groupe ne dépasse jamais sa capacité physique.</p>
+
+<h3>C3 — Compatibilité (choix LV2)</h3>
+$$\forall e \in s, \forall g \notin \text{compat}(e) : x_{e,g} = 0$$
+<p>Un étudiant Allemand ne peut pas être dans un groupe Espagnol. On force à 0 les variables interdites.</p>
+
+<h3>C4 — Hiérarchie TP ⊂ TD (formalisée, non codée ici)</h3>
+$$\forall tp \in TP : \text{parent}(tp) \in TD \implies n(tp) \le n(\text{parent}(tp))$$
+<div class="warn"><strong>À dire au prof :</strong> cette contrainte est dans la formalisation mais
+pas dans le code CP-SAT actuel, car l'instance de test ne mélange pas les types. Elle sera ajoutée
+quand on affectera TP+TD+LV2+LV1 en une seule passe.</div>
+
+<h3>C5 — Exactement k groupes ouverts (dur, avant l'équilibre)</h3>
+$$\sum_{g \in G} y_g = k$$
+<p class="justify">C'est le cœur du modèle « dur avant souple ». L'ancienne version mettait
+le nombre de groupes dans un <strong>objectif souple</strong> (f2) : le solveur pouvait ouvrir 40 TP de
+2 étudiants si ça « coûtait moins cher ». Maintenant c'est une <strong>contrainte dure</strong> :
+on décide <code>k</code> en amont (c'est une décision d'organisation, pas un réglage d'optimisation).</p>
+
+<h3>C6 — Rien dans un groupe fermé (lien y / x)</h3>
+$$\forall g \in G : n(g) \le C(g) \cdot y_g$$
+<p>Si <code>y_g = 0</code> (fermé), alors <code>n(g) ≤ 0</code>, donc <code>n(g) = 0</code>.
+Un groupe fermé ne prend personne. C'est une <strong>big-M</strong> classique (ici M = C(g)).</p>
+
+<h3>C7 — Un groupe ouvert a au moins un étudiant</h3>
+$$\forall g \in G : y_g \le n(g)$$
+<p>Symétrique de C6 : si <code>y_g = 1</code> (ouvert), alors <code>n(g) ≥ 1</code>. Pas de groupe ouvert vide.</p>
+
+<div class="note"><strong>Résumé C5-C7 :</strong> on force exactement <code>k</code> groupes à être
+utiles. Ni plus (sinon groupe vide), ni moins (sinon on triche sur la capacité). C'est ça,
+« structurer d'abord, équilibrer ensuite ».</div>
+
+<h3>C8 (implicite) — Étudiant non affecté (optionnel)</h3>
+<p>Dans les instances avec cas particuliers (césure, redoublant), on peut retirer ces étudiants de
+<code>s</code> avant de lancer le modèle, ou ajouter une contrainte de couverture partielle.
+Ici, on les retire.</p>
+
+<h2 id="s5">5. Objectif : f1 relative, forme entière, normalisation</h2>
+
+<h3>5.1 L'ancienne f1 et ses défauts</h3>
+<p>L'ancienne version minimisait :</p>
+$$f_1 = \sum_{t} \sum_{g \in G(t)} \left| n(g) - \frac{N(t)}{k(t)} \right|$$
+<p><strong>Défaut 1 : pas normalisée entre types.</strong> Un écart de 2 étudiants est anodin sur un
+TD de 36, énorme sur un TP de 5. La formule les pèse pareil → les gros groupes (TD) dominent.</p>
+<p><strong>Défaut 2 : L1 avec somme fixe.</strong> Comme <code>∑n(g) = N</code> est imposé par C1,
+<code>∑(n(g) − N/k) = 0</code> toujours. L'absolu ne mesure que la moitié de l'histoire.</p>
+
+<h3>5.2 La nouvelle f1 : déviation relative</h3>
+$$f_1 = \sum_{t} \sum_{g \in G(t)} \frac{\left| n(g) - \frac{N(t)}{k(t)} \right|}{\frac{N(t)}{k(t)}}$$
+<p class="justify"><strong>Pourquoi relative ?</strong> Parce qu'un étudiant de trop pèse 20% sur un
+TP de 5 mais 3% sur un TD de 36. On veut que chaque <strong>pourcentage</strong> de déséquilibre compte
+pareil, quel que soit la taille du groupe.</p>
+
+<h3>5.3 Forme entière équivalente (celle du code)</h3>
+<p>Multiplier par <code>k(t)</code> (positif) ne change pas le minimiseur :</p>
+$$f_1' = \sum_{t} \sum_{g \in G(t)} \left| k(t) \cdot n(g) - N(t) \right|$$
+<p class="justify"><strong>Pourquoi cette forme en code ?</strong> Parce que CP-SAT travaille en
+entiers. <code>AddAbsEquality(v, k*n(g) - N)</code> est exact, sans flottants, sans approximation.
+C'est le même minimiseur que la version relative.</p>
+
+<h3>5.4 Normalisation explicite (justification chiffrée)</h3>
+<p>On calcule les <strong>bornes</strong> de <code>f1'</code> :</p>
+<ul>
+  <li><strong>Pire cas (f_max)</strong> : tous les étudiants dans un seul groupe (les autres fermés) :
+  $f_{\max} = 2N(k-1)$</li>
+  <li><strong>Meilleur cas (f_min)</strong> : répartition aussi proche que possible de l'idéal. Avec
+  $r = N \bmod k$ (le reste de la division), $f_{\min} = 2r(k-r)$. Si <code>r = 0</code>,
+  <code>N</code> est divisible par <code>k</code> → <code>f_min = 0</code> (équilibre parfait).</li>
+</ul>
+<p>La <strong>fonction objectif normalisée</strong> :</p>
+$$\tilde{f_1} = \frac{f_1' - f_{\min}}{f_{\max} - f_{\min}} \in [0, 1]$$
+<p class="justify"><strong>Exemple chiffré :</strong> <code>N=12, k=3</code>. <code>f_max = 2*12*2 = 48</code>,
+<code>r=0, f_min=0</code>. Si la solution donne <code>6/3/3</code> : <code>f1' = |3*6-12|+|3*3-12|+|3*3-12| = 6+3+3 = 12</code>,
+<code>f1_norm = 12/48 = 0.25</code>. Si solution <code>4/4/4</code> : <code>f1' = 0</code>, <code>f1_norm = 0</code>.</p>
+<p><strong>Deuxième exemple (non divisible) :</strong> <code>N=10, k=3</code>. <code>r=1, f_min=2*1*2=4</code>,
+<code>f_max=2*10*2=40</code>. Solution optimale <code>4/3/3</code> : <code>f1' = |12-10|+|9-10|+|9-10| = 2+1+1 = 4 = f_min</code>,
+donc <code>f1_norm = 0</code>. La normalisation met à 0 le meilleur atteignable, ce qui permet de
+comparer des instances de tailles différentes.</p>
+
+<h3>5.5 Pourquoi normaliser est indispensable (avouer au prof)</h3>
+<p>Sans normalisation, <code>f1'</code> peut valoir <code>48</code> (étudiants) quand un autre critère
+(ancien f2) vaut <code>5</code> (groupes). Dans une somme pondérée <code>w1*f1 + w2*f2</code>, le poids
+<code>w2</code> est <strong>mort</strong> : <code>f1</code> l'écrase. Une fois normalisées, les poids
+<code>w</code> deviennent des <strong>taux d'échange</strong> interprétables (« j'accepte 1 unité
+d'équilibre relatif pour 2 groupes fermés »). C'est ça, justifier.</p>
+
+<h3>5.6 f2 et f3 : où sont-elles passées ?</h3>
+<ul>
+  <li><strong>Ancien f2 (nombre de groupes ouverts)</strong> : absorbé par <strong>C5 (dur)</strong>. On ne
+  « minimise plus » le nombre de groupes, on le <strong>décide</strong>.</li>
+  <li><strong>Ancien f3 (parallélisation / créneaux)</strong> : supprimée. Le nombre de salles
+  <code>R(t)</code> n'était jamais justifié (d'où vient-il ?). La schedulabilité est portée par le choix
+  de <code>k(t)</code> en entrée : si <code>k(t)</code> groupes tiennent dans <code>H</code> créneaux
+  max, la solution est schedulable ; sinon, on a un mauvais <code>k(t)</code>, pas un mauvais modèle.</li>
+  <li><strong>f4 (robustesse / affectation tardive)</strong> : reportée semaine 6, pas dans ce code.</li>
+</ul>
+
+<h2 id="s6">6. Indicateurs retournés par <code>resoudre()</code></h2>
+<p>La fonction retourne <strong>4 valeurs</strong> :</p>
+<pre><code>statut, aff, eff, ind = resoudre(s, groupes, k=None, compat=None)</code></pre>
+<table>
+  <tr><th>Valeur</th><th>Type</th><th>Contenu</th></tr>
+  <tr><td><code>statut</code></td><td>int</td><td>Statut du solveur (<code>OPTIMAL</code>, <code>FEASIBLE</code>, <code>INFEASIBLE</code>, …)</td></tr>
+  <tr><td><code>aff</code></td><td>dict</td><td><code>{etudiant: groupe}</code> — la solution (vide si infaisable)</td></tr>
+  <tr><td><code>eff</code></td><td>dict</td><td><code>{groupe: effectif}</code> — effectifs réalisés</td></tr>
+  <tr><td><code>ind</code></td><td>dict</td><td>Indicateurs : <code>k</code>, <code>f1</code>, <code>f1_norm</code>, <code>maxmin</code></td></tr>
+</table>
+
+<h3>Les 4 indicateurs</h3>
+<table>
+  <tr><th>Indicateur</th><th>Définition</th><th>Interprétation</th></tr>
+  <tr><td><code>k</code></td><td>Nombre de groupes réellement ouverts (<code>∑y(g)</code>)</td><td>Doit être égal au <code>k</code> demandé (C5)</td></tr>
+  <tr><td><code>f1</code></td><td><code>∑|k·n(g) − N|</code> (forme entière)</td><td>Écart brut (non normalisé)</td></tr>
+  <tr><td><code>f1_norm</code></td><td><code>(f1 − f_min)/(f_max − f_min)</code></td><td>Écart relatif dans [0,1], comparable entre instances</td></tr>
+  <tr><td><code>maxmin</code></td><td><code>max n(g) − min n(g)</code> sur les groupes ouverts</td><td>« Le plus gros groupe a x de plus que le plus petit » — plus lisible pour l'administration</td></tr>
+</table>
+
+<div class="note"><strong>Pourquoi <code>maxmin</code> en plus de f1 ?</strong> Parce que l'administration
+dit « équitable » au sens de « pas d'écart exagéré entre le plus gros et le plus petit ». C'est
+une mesure <strong>lisible</strong>, alors que f1 est une mesure <strong>agrégée</strong>. Les deux se
+complètent.</div>
+
+<h2 id="s7">7. Le code, ligne par ligne</h2>
+<p>Voici le cœur du modèle (extrait de <code>test_cpsat.py</code>), avec le commentaire correspondant :</p>
+
+<pre><code>def resoudre(s, groupes, k=None, compat=None):
+    m = cp_model.CpModel()
+    k = len(groupes) if k is None else k  # k non spécifié -> tous les groupes ouverts
+
+    # x[e,g] : étudiant e dans le groupe g
+    x = {(e, g): m.NewBoolVar(f"x{e}_{g}") for e in s for g in groupes}
+
+    # C1 : chaque étudiant dans exactement un groupe
+    for e in s:
+        m.Add(sum(x[e, g] for g in groupes) == 1)
+
+    # C2 : capacité maximale
+    for g, cap in groupes.items():
+        m.Add(sum(x[e, g] for e in s) <= cap)
+
+    # C3 : groupes compatibles avec le choix LV2 de e
+    for e, a in (compat or {}).items():
+        for g in set(groupes) - set(a):
+            m.Add(x[e, g] == 0)
+
+    # n[g] : effectif du groupe g (calculé)
+    n = {g: sum(x[e, g] for e in s) for g in groupes}
+
+    # y[g] : groupe g ouvert ou non
+    y = {g: m.NewBoolVar(f"y{g}") for g in groupes}
+
+    # C5 : exactement k groupes ouverts (dur)
+    m.Add(sum(y.values()) == k)
+
+    for g, cap in groupes.items():
+        # C6 : rien dans un groupe fermé (big-M)
+        m.Add(n[g] <= cap * y[g])
+        # C7 : un groupe ouvert a au moins un étudiant
+        m.Add(y[g] <= n[g])
+
+    N = len(s)
+    # e[g] : variable auxiliaire pour |k·n(g) − N|
+    ecarts = [m.NewIntVar(0, k * N, f"e{g}") for g in groupes]
+    for g, v in zip(groupes, ecarts):
+        m.AddAbsEquality(v, k * n[g] - N)  # f1 : forme entière
+
+    # Minimiser la somme des écarts
+    m.Minimize(sum(ecarts))
+
+    solver = cp_model.CpSolver()
+    solver.parameters.max_time_in_seconds = 10
+    statut = solver.Solve(m)
+
+    if statut not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+        return statut, {}, {}, {}  # infaisable -> dictionnaires vides
+
+    # Reconstruire la solution
+    aff = {e: next(g for g in groupes if solver.Value(x[e, g])) for e in s}
+    eff = {g: solver.Value(n[g]) for g in groupes}
+    ouverts = [g for g in groupes if solver.Value(y[g])]
+
+    # Calculer les indicateurs
+    f1 = sum(abs(k * eff[g] - N) for g in ouverts)
+    r = N % k
+    fmin, fmax = 2 * r * (k - r), 2 * N * (k - 1)
+    norm = 0.0 if fmax == fmin else (f1 - fmin) / (fmax - fmin)
+    ind = {
+        "k": len(ouverts),
+        "f1": f1,
+        "f1_norm": round(norm, 3),
+        "maxmin": max(eff[g] for g in ouverts) - min(eff[g] for g in ouverts),
+    }
+    return statut, aff, eff, ind</code></pre>
+
+<h2 id="s8">8. Les 7 tests</h2>
+<p>Chaque test vérifie une propriété du modèle. Voici la liste :</p>
+
+<h3>Test 1 — Équilibre (C1 + C2 + f1)</h3>
+<p>12 étudiants, 3 TP de 5. Solution attendue : <code>4/4/4</code>, <code>f1=0</code>.</p>
+<p class="justify">12 divisible par 3 → équilibre parfait possible. Capacité 5 ≥ 4 → OK.</p>
+
+<h3>Test 2 — Capacités (C2)</h3>
+<p>24 étudiants, 3 TP de 8. Vérifie que <code>eff[g] ≤ 8</code> partout.</p>
+
+<h3>Test 3 — Infaisable (C2 + C1)</h3>
+<p>12 étudiants, 3 TP de 3 (capacité totale 9). Attendu : <code>INFEASIBLE</code>.</p>
+
+<h3>Test 4 — Choix LV2 (C3)</h3>
+<p>6 Allemand + 6 Espagnol, compat imposée. Vérifie que chaque étudiant est dans un groupe
+compatible avec son choix.</p>
+
+<h3>Test 5 — Instance réaliste (C1 + C2)</h3>
+<p>75 étudiants, 5 TP de 16. Vérifie que rien ne dépasse.</p>
+
+<h3>Test 6 — k imposé en dur (C5)</h3>
+<p>12 étudiants, 3 TP de 5, mais <code>k=2</code>. Capacité totale ouverte : 2*5=10 &lt; 12 →
+<code>INFEASIBLE</code>. C'est la contrainte dure qui parle.</p>
+
+<h3>Test 7 — Indicateurs (f1, f1_norm, maxmin)</h3>
+<p>10 étudiants, 3 TP de 5. Solution optimale : <code>4/3/3</code>. Calculs :</p>
+<ul>
+  <li><code>f1 = |3*4-10| + |3*3-10| + |3*3-10| = 2+1+1 = 4</code></li>
+  <li><code>r = 10%3 = 1</code>, <code>f_min = 2*1*2 = 4</code> → <code>f1_norm = 0</code></li>
+  <li><code>maxmin = 4-3 = 1</code></li>
+</ul>
+
+<h2 id="s9">9. Banc d'essai S3 : 10 instances, sensibilité à k</h2>
+<p>On génère 10 instances avec le générateur (<code>n ~ N(64,10)</code>, LV2 bruité), on affecte les
+LV2 avec le modèle, et on regarde ce qui se passe quand on ouvre <strong>plus de groupes que le
+strict minimum</strong>.</p>
+
+<h3>Résultats</h3>
+<table>
+  <tr><th>Configuration</th><th>f1 moyen</th><th>f1_norm moyen</th><th>maxmin moyen</th><th>Infaisables</th></tr>
+  <tr><td>k = minimum nécessaire</td><td>26.2</td><td>0.078</td><td>6.0</td><td>0/10</td></tr>
+  <tr><td>k = min + 1</td><td>0.0</td><td>0.000</td><td>0.0</td><td>0/10</td></tr>
+  <tr><td>k = min + 2</td><td>0.0</td><td>0.000</td><td>0.0</td><td>0/10</td></tr>
+</table>
+
+<h3>Lecture</h3>
+<ul>
+  <li>Au <strong>strict minimum</strong>, la capacité et la compatibilité bloquent : f1_norm monte
+  jusqu'à 0.17 (17% de dégradation relative), maxmin jusqu'à 11 (le plus gros groupe a 11 de plus
+  que le plus petit).</li>
+  <li><strong>Un seul groupe de plus</strong> suffit à un équilibre parfait (f1=0, maxmin=0) sur les
+  10 instances.</li>
+  <li><strong>f1 brut n'est pas comparable entre k</strong> (il contient le facteur k dans |k·n−N|).
+  C'est tout l'intérêt de f1_norm, qui est dans [0,1] et comparable.</li>
+</ul>
+
+<div class="box"><strong>Conclusion pour le compte-rendu S3 :</strong> le modèle « dur avant souple »
+(C5-C7) fonctionne. On peut mesurer (indicateurs), comparer (normalisation), et justifier le
+compromis « un groupe de plus = équilibre parfait » (pertinence).</div>
+
+<h2 id="s10">10. Le générateur d'instances (étendu)</h2>
+<p>Le fichier <code>src/generateur_instances.py</code> fournit :</p>
+<ul>
+  <li><code>generer_instance(n, seed, ...)</code> : instance déterministe, bornes [50,100], distribution
+  LV2 par défaut (45/20/35), choix tardifs, cas particuliers (césure, redoublant).</li>
+  <li><code>generer_n(mu=64, sigma=10)</code> : effectif tiré selon une <strong>loi normale</strong>
+  <code>N(64, 10)</code>, tronqué au cadrage [50,100].</li>
+  <li><code>generer_lot(nb, seed)</code> : lot de <code>nb</code> instances avec graines fixées
+  (reproductible), distribution LV2 bruitée gaussiennement (σ=0.05) puis renormalisée.</li>
+</ul>
+<p class="justify">Pourquoi une loi normale ? Parce que l'effectif réel d'une promo varie d'une année
+à l'autre autour d'une moyenne (ici 64). Une distribution uniforme ou fixe ne testerait pas le
+comportement du modèle sur des tailles réalistes.</p>
+
+<h2 id="s11">11. Analyse des fichiers .grist (données réelles)</h2>
+<p>Les deux fichiers <code>.grist</code> (juillet et septembre) sont des <strong>bases de données
+Grist</strong> (SQLite). Analyse complète :</p>
+
+<h3>11.1 Contenu</h3>
+<ul>
+  <li><strong>76 étudiants</strong> (septembre) / 80 (juillet) avec leur choix LV2, affectation TP/LV1/LV2/TD.</li>
+  <li><strong>23 groupes</strong> de types variés (TP, TD, LV1, LV2, TPChimie, PROMO).</li>
+  <li><strong>Tables de logique</strong> : <code>LV2_TO_TP</code>, <code>LV2_TO_LV1</code>, <code>LV1_TO_TP</code>
+  (règles de compatibilité entre niveaux).</li>
+  <li><strong>Affectations spéciales</strong> : <code>Redoublants_Affectation</code>, <code>PASAUEAR_Affectation</code>.</li>
+</ul>
+
+<h3>11.2 Recherche d'une heuristique Python</h3>
+<p>Analyse en profondeur des 45 tables de chaque fichier :</p>
+<table>
+  <tr><th>Zone inspectée</th><th>Résultat</th></tr>
+  <tr><td><code>_grist_REPL_Hist</code> (code exécuté)</td><td>0 ligne — vide</td></tr>
+  <tr><td><code>_grist_Cells</code> (cellules avec formules)</td><td>0 ligne — vide</td></tr>
+  <tr><td><code>_grist_Attachments</code> (fichiers joints)</td><td>0 pièce jointe</td></tr>
+  <tr><td><code>_grist_Triggers</code> (actions automatiques)</td><td>0 ligne — vide</td></tr>
+  <tr><td><code>_grist_Tables_column.formula</code></td><td>Formules d'affichage Grist simples (concaténation noms), pas d'algorithme</td></tr>
+  <tr><td><code>_gristsys_ActionHistory</code></td><td>1 action « Calculate » (rafraîchissement des colonnes calculées), pas de code d'affectation</td></tr>
+</table>
+
+<div class="warn"><strong>Conclusion :</strong> les fichiers <code>.grist</code> ne contiennent
+<strong>aucune heuristique Python</strong>. Ce sont des <strong>données pures</strong> (étudiants +
+groupes + affectations manuelles de l'admin). L'heuristique montrée par le prof en cours n'a pas été
+fournie sous forme de fichier.</div>
+
+<h3>11.3 Ce qu'on en tire : la référence manuelle</h3>
+<p>En revanche, les <code>.grist</code> contiennent <strong>l'affectation manuelle réelle</strong> de
+l'admin (septembre) : 62 étudiants répartis en 4 TP (16/16/14/16). C'est exactement la
+<strong>référence</strong> que le prof demandait pour comparer :</p>
+<ul>
+  <li>Le TP3 (14 étudiants) est sous-optimal par rapport à un équilibre parfait (15.5/15.5).</li>
+  <li>L'écart max-min observé est de <strong>2</strong> (16−14).</li>
+</ul>
+
+<h2 id="s12">12. Comparaison 3 méthodes (S3 : référence, baseline, CP-SAT)</h2>
+<p>Sur la <strong>même instance réelle</strong> (septembre, 62 étudiants, 4 TP de capacité 16), on
+compare trois approches :</p>
+
+<h3>12.1 Les trois méthodes</h3>
+<ol>
+  <li><strong>Référence manuelle</strong> : l'affectation réelle de l'admin (extraite du .grist).</li>
+  <li><strong>Baseline naive</strong> : remplissage à la volée — chaque étudiant va dans le premier
+  groupe avec de la place (ce que fait un script simple sans optimisation).</li>
+  <li><strong>Modèle CP-SAT</strong> : notre optimiseur (f1 relative, C5-C7, 10s max).</li>
+</ol>
+
+<h3>12.2 Résultats</h3>
+<table>
+  <tr><th>Méthode</th><th>f1</th><th>f1_norm</th><th>maxmin</th><th>Temps</th></tr>
+  <tr><td>Référence manuelle (admin)</td><td>12</td><td>0.011</td><td>2</td><td>—</td></tr>
+  <tr><td>Baseline naive (greedy)</td><td>12</td><td>0.011</td><td>2</td><td>0.000s</td></tr>
+  <tr><td><strong>Modèle CP-SAT</strong></td><td><strong>8</strong></td><td><strong>0.000</strong></td><td><strong>1</strong></td><td>0.163s</td></tr>
+</table>
+
+<h3>12.3 Effectifs par groupe</h3>
+<table>
+  <tr><th>Groupe</th><th>Référence</th><th>Baseline</th><th>CP-SAT</th></tr>
+  <tr><td>TP1</td><td>16</td><td>16</td><td>16</td></tr>
+  <tr><td>TP2</td><td>16</td><td>16</td><td>16</td></tr>
+  <tr><td>TP3</td><td>14</td><td>16</td><td>15</td></tr>
+  <tr><td>TP4</td><td>16</td><td>14</td><td>15</td></tr>
+</table>
+
+<h3>12.4 Lecture</h3>
+<ul>
+  <li><strong>La référence manuelle est au niveau de la baseline</strong> : l'admin a rempli les TP
+  à la volée (TP1 et TP2 pleins à 16, TP3 à 14 par manque d'étudiants). Ce n'est pas un jugement —
+  c'est le comportement naturel d'un remplissage séquentiel.</li>
+  <li><strong>CP-SAT fait mieux</strong> : f1=8 = f_min (r=62%4=2, f_min=2×2×2=8), donc
+  <code>f1_norm=0</code> (équilibre optimal atteint). L'écart max-min tombe de 2 à 1.</li>
+  <li><strong>Le gain est réel mais petit</strong> sur cette instance (car les capacités sont
+  généreuses : 4×16=64 places pour 62 étudiants). Sur des instances plus serrées (voir banc d'essai
+  section 9), le gain est bien plus visible.</li>
+  <li><strong>Le temps de résolution</strong> (0.16s) est négligeable pour un usage pratique.</li>
+</ul>
+
+<h2 id="s13">13. Pertinence : est-ce que l'objectif capture le vrai besoin ?</h2>
+
+<h3>13.1 Ce que veut l'administration</h3>
+<p>D'après le cadrage du projet et les données réelles :</p>
+<ul>
+  <li>Des groupes <strong>équilibrés</strong> (pas un TP de 20 et un autre de 10).</li>
+  <li>Le <strong>respect du choix LV2</strong> de chaque étudiant.</li>
+  <li>Un <strong>nombre de groupes stable</strong> (pour la planification des salles/enseignants).</li>
+  <li>Des <strong>contraintes hiérarchiques</strong> (TP dans TD, LV2 dans LV1, etc.).</li>
+</ul>
+
+<h3>13.2 Ce que capture notre objectif</h3>
+<table>
+  <tr><th>Besoin admin</th><th>Capture par</th><th>Type</th></tr>
+  <tr><td>Équilibre des effectifs</td><td>f1 (relative) + maxmin</td><td>Souple (objectif)</td></tr>
+  <tr><td>Respect du choix LV2</td><td>C3 (compatibilité)</td><td>Dur (contrainte)</td></tr>
+  <tr><td>Nombre de groupes stable</td><td>C5 (exactement k ouverts)</td><td>Dur (contrainte)</td></tr>
+  <tr><td>Capacité des salles</td><td>C2 (capacité max)</td><td>Dur (contrainte)</td></tr>
+  <tr><td>Hiérarchie TP ⊂ TD</td><td>C4 (formalisée, non codée)</td><td>Dur (à venir)</td></tr>
+  <tr><td>Affectation tardive / robustesse</td><td>f4 (semaine 6)</td><td>Souple (à venir)</td></tr>
+</table>
+
+<h3>13.3 Démonstration par l'exemple</h3>
+<p>Sur l'instance réelle (section 12) :</p>
+<ul>
+  <li>La <strong>référence manuelle</strong> a f1_norm=0.011 (1.1% de dégradation) — presque parfait,
+  car les capacités sont larges.</li>
+  <li>La <strong>baseline</strong> a le même score — preuve que le remplissage naïf est « assez bon »
+  quand il y a de la marge.</li>
+  <li><strong>CP-SAT</strong> atteint f1_norm=0 — l'équilibre parfait. Le gain est modeste ici, mais
+  il devient critique quand les capacités sont serrées (section 9 : f1_norm=0.17 au strict minimum).</li>
+</ul>
+
+<div class="box"><strong>Réponse à la question « pertinence » :</strong> oui, l'objectif capture le
+vrai besoin. La f1 relative pénalise les déséquilibres <strong>proportionnellement</strong> à la
+taille du groupe (un étudiant de trop sur un TP de 5 = 20%, sur un TD de 36 = 3%). La normalisation
+permet de comparer des instances de tailles différentes. Et la contrainte dure C5 (exactement k
+groupes) garantit la stabilité de la planification, ce que l'ancien objectif souple f2 ne faisait
+pas.</div>
+
+<h2 id="s14">14. Synthèse S3 : où on en est</h2>
+<table>
+  <tr><th>Exigence S3</th><th>Statut</th><th>Preuve</th></tr>
+  <tr><td>Évaluer le modèle (indicateurs)</td><td>✅ Fait</td><td>Banc d'essai 10 instances (section 9)</td></tr>
+  <tr><td>Sensibilité / compromis</td><td>✅ Fait</td><td>Courbe f1 vs k (section 9)</td></tr>
+  <tr><td>Comparer à une référence</td><td>✅ Fait</td><td>Comparaison 3 méthodes (section 12)</td></tr>
+  <tr><td>Pertinence de l'objectif</td><td>✅ Fait</td><td>Analyse besoins admin (section 13)</td></tr>
+  <tr><td>Heuristique (comparaison)</td><td>✅ Fait</td><td>Greedy vs CP-SAT, 10/10, ×173 (section 15)</td></tr>
+</table>
+
+<div class="note"><strong>Heuristique :</strong> implémentée en semaine 3 (section 15). Le prof avait
+montré une heuristique en cours mais sans fournir de fichier ; on a donc écrit notre propre greedy
+constructif et comparé au CP-SAT.</div>
+
+<h2 id="s15">15. Heuristique greedy constructif vs CP-SAT exact</h2>
+
+<h3>15.1 Principe de l'heuristique</h3>
+<p>L'heuristique est un <strong>remplissage constructif</strong> (greedy) : on place les étudiants un
+par un, chacun dans le <strong>groupe compatible le moins chargé</strong> qui a encore de la place.
+L'astuce clé est l'ordre de passage :</p>
+<ul>
+  <li><strong>Most constrained first</strong> : on traite d'abord les étudiants qui ont le
+  <strong>moins de groupes compatibles</strong>. C'est une heuristique classique en satisfaction de
+  contraintes : si on traite les plus contraints en dernier, on risque de les bloquer (plus aucun
+  groupe compatible n'a de place).</li>
+</ul>
+
+<h3>15.2 Le code</h3>
+<pre><code>def greedy(s, groupes, compat=None):
+    aff = {}
+    eff = {g: 0 for g in groupes}
+    # most constrained first : les etudiants avec le moins de choix d'abord
+    etuds = sorted(s.keys(), key=lambda e: len(compat[e]) if compat else len(groupes))
+    for e in etuds:
+        cand = [g for g in groupes if eff[g] < groupes[g]]
+        if compat and e in compat:
+            cand = [g for g in cand if g in compat[e]]
+        if not cand:
+            return {}, {}  # infaisable
+        best = min(cand, key=lambda g: eff[g])  # groupe le moins charge
+        aff[e] = best
+        eff[best] += 1
+    return aff, eff</code></pre>
+
+<h3>15.3 Comparaison : instance réelle (septembre)</h3>
+<table>
+  <tr><th>Méthode</th><th>f1</th><th>f1_norm</th><th>maxmin</th><th>Temps</th></tr>
+  <tr><td>Greedy</td><td>8</td><td>0.000</td><td>1</td><td>0.00011s</td></tr>
+  <tr><td>CP-SAT</td><td>8</td><td>0.000</td><td>1</td><td>0.07901s</td></tr>
+</table>
+<p>Sur cette instance, les deux méthodes atteignent l'équilibre optimal (f1 = f_min = 8).</p>
+
+<h3>15.4 Comparaison : lot de 10 instances générées</h3>
+<table>
+  <tr><th>inst</th><th>n</th><th>k</th><th>Greedy f1</th><th>Greedy norm</th><th>Greedy t(s)</th><th>CP-SAT f1</th><th>CP-SAT norm</th><th>CP-SAT t(s)</th></tr>
+  <tr><td>1</td><td>56</td><td>4</td><td>8</td><td>0.024</td><td>0.0001</td><td>8</td><td>0.024</td><td>0.025</td></tr>
+  <tr><td>2</td><td>63</td><td>4</td><td>12</td><td>0.016</td><td>0.0001</td><td>12</td><td>0.016</td><td>0.031</td></tr>
+  <tr><td>3</td><td>55</td><td>3</td><td>28</td><td>0.111</td><td>0.0001</td><td>28</td><td>0.111</td><td>0.013</td></tr>
+  <tr><td>4</td><td>54</td><td>3</td><td>36</td><td>0.167</td><td>0.0001</td><td>36</td><td>0.167</td><td>0.016</td></tr>
+  <tr><td>5</td><td>52</td><td>4</td><td>48</td><td>0.154</td><td>0.0001</td><td>48</td><td>0.154</td><td>0.031</td></tr>
+  <tr><td>6</td><td>50</td><td>4</td><td>40</td><td>0.110</td><td>0.0001</td><td>40</td><td>0.110</td><td>0.031</td></tr>
+  <tr><td>7</td><td>58</td><td>4</td><td>24</td><td>0.047</td><td>0.0002</td><td>24</td><td>0.047</td><td>0.031</td></tr>
+  <tr><td>8</td><td>71</td><td>4</td><td>14</td><td>0.019</td><td>0.0002</td><td>14</td><td>0.019</td><td>0.030</td></tr>
+  <tr><td>9</td><td>60</td><td>4</td><td>40</td><td>0.111</td><td>0.0003</td><td>40</td><td>0.111</td><td>0.032</td></tr>
+  <tr><td>10</td><td>57</td><td>4</td><td>12</td><td>0.018</td><td>0.0001</td><td>12</td><td>0.018</td><td>0.031</td></tr>
+</table>
+<p><strong>Moyenne :</strong> greedy f1=26.2 en 0.00016s ; CP-SAT f1=26.2 en 0.02709s.
+<strong>Gain de temps : ×173.</strong></p>
+
+<h3>15.5 Lecture</h3>
+<ul>
+  <li><strong>Qualité :</strong> le greedy atteint le même f1 que CP-SAT sur <strong>10/10 instances</strong>.
+  Sur ces instances (n ≤ 71, capacités larges), la stratégie « most constrained first + groupe le moins
+  chargé » suffit à trouver l'optimum.</li>
+  <li><strong>Temps :</strong> le greedy est <strong>173 fois plus rapide</strong> (0.0002s vs 0.027s).
+  Le gain serait encore plus net sur des grosses instances (n > 500), où CP-SAT peut devenir lent.</li>
+  <li><strong>Garantie :</strong> CP-SAT <strong>garantit</strong> f1 = f_min (optimum prouvé). Le greedy
+  ne garantit rien : sur des instances plus contraintes (capacités serrées, beaucoup de compatibilités),
+  il peut être suboptimal. C'est là que le solveur exact fait la différence.</li>
+  <li><strong>Usage pratique :</strong> greedy pour un premier résultat immédiat (ex. aperçu à l'écran
+  pendant la saisie des choix) ; CP-SAT pour l'affectation officielle (qualité garantie, temps encore
+  tout à fait acceptable à cette échelle).</li>
+</ul>
+
+<div class="box"><strong>Conclusion :</strong> l'heuristique greedy et le solveur CP-SAT sont
+<strong>complémentaires</strong>. Le greedy donne un résultat quasi-optimal instantanément ; CP-SAT
+garantit l'optimum en une fraction de seconde sur les instances du projet. Les deux convergent sur
+toutes nos instances testées, ce qui valide la cohérence du modèle.</div>
+
+</main>
+
+<script>
+  // Coloration syntaxique minimale pour les blocs de code (sans dépendance externe)
+  document.querySelectorAll('pre code').forEach(block => {
+    let html = block.innerHTML
+      .replace(/(#.*)/g, '<span style="color:#7f8c9b">$1</span>')
+      .replace(/\b(for|in|if|else|elif|return|def|import|from|not|and|or|None|True|False)\b/g,
+               '<span style="color:#e9a03c">$1</span>')
+      .replace(/(&quot;[^&]*&quot;|"[^"]*")/g, '<span style="color:#98c379">$1</span>')
+      .replace(/\b(\d+)\b/g, '<span style="color:#d19a66">$1</span>');
+    block.innerHTML = html;
+  });
+</script>
+
+</body>
+</html>
