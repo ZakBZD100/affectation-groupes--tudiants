@@ -10,8 +10,8 @@ CAP = 24
 def prep(inst):
     """instance -> (s, groupes LV2, compat) sur etudiants "normal" (les cas
     particuliers sont traites apart, hors affectation a la rentree)."""
-    etuds = [e for e in inst["etudiants"] if e["statut"] == "normal"]
-    s = {e["id"]: e["lv2"] for e in etuds}
+    etuds = [e for e in inst.etudiants if e.statut == "normal"]
+    s = {e.id: e.lv2 for e in etuds}
     groupes, compat = {}, {}
     for L in sorted(set(s.values())):
         nl = sum(1 for v in s.values() if v == L)

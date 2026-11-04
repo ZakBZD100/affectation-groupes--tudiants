@@ -60,8 +60,8 @@ def calc_ind(eff, k, N):
 
 def instance_lv2(inst, cap=24):
     """Instance generee -> (s, groupes LV2, compat) etudiants "normal"."""
-    etuds = [e for e in inst["etudiants"] if e["statut"] == "normal"]
-    s = {e["id"]: e["lv2"] for e in etuds}
+    etuds = [e for e in inst.etudiants if e.statut == "normal"]
+    s = {e.id: e.lv2 for e in etuds}
     groupes, compat = {}, {}
     for L in sorted(set(s.values())):
         nl = sum(1 for v in s.values() if v == L)
