@@ -177,9 +177,13 @@ def _f1_max(etudiants_par_bloc, groupes_par_bloc, groupes, compat):
     return total
 
 
-def _f2_min(etudiants_par_bloc, groupes_par_bloc, groupes, capacite_max):
-    """Minimum couvrant, par bloc : somme_b ceil(N_b / Cmax_b)."""
-    total = 0
+def _f2_bornes_bloc(etudiants_par_bloc, groupes_par_bloc, groupes, capacite_max):
+    """Bornes de f2, bloc par bloc : (ceil(N_b/Cmax_b), |G(b)|).
+
+    Le minimum couvrant et le maximum « tout ouvert » se calculent dans chaque
+    bloc : un groupe Espagnol ne peut pas remplacer un groupe Allemand.
+    """
+    bornes = {}
     for bloc, etudiants in etudiants_par_bloc.items():
         groupes_bloc = groupes_par_bloc.get(bloc, ())
         if not groupes_bloc:
@@ -191,8 +195,18 @@ def _f2_min(etudiants_par_bloc, groupes_par_bloc, groupes, capacite_max):
         )
         if cmax <= 0:
             return None
-        total += ceil(len(etudiants) / cmax)
-    return total
+        bornes[bloc] = (ceil(len(etudiants) / cmax), len(groupes_bloc))
+    return bornes
+
+
+def _f2_min(bornes):
+    """Somme des minimums couvrants des blocs."""
+    return sum(lo for lo, _ in bornes.values())
+
+
+def _f2_max(bornes):
+    """Somme des nombres de groupes de chaque bloc (tout ouvert)."""
+    return sum(hi for _, hi in bornes.values())
 
 
 def _verifier(s, groupes, aff, compat, blocs):
@@ -339,12 +353,15 @@ def evaluer(s, groupes, aff, compat=None, blocs=None, poids=None, capacite_max=N
     f1 = sum(_f1_bloc(eb)[0] for eb in eff_par_bloc.values())
     f1_max = _f1_max(etudiants_par_bloc, groupes_par_bloc, groupes, compat)
     f2 = sum(1 for g in groupes if eff.get(g, 0) > 0)
-    f2_min = _f2_min(etudiants_par_bloc, groupes_par_bloc, groupes, capacite_max)
-    f2_max = len(groupes)
+    f2_bornes = _f2_bornes_bloc(
+        etudiants_par_bloc, groupes_par_bloc, groupes, capacite_max
+    )
+    f2_min = None if f2_bornes is None else _f2_min(f2_bornes)
+    f2_max = None if f2_bornes is None else _f2_max(f2_bornes)
     f3 = 0.0  # LV2 seul : un seul type, donc aucune paire de types différents.
     f3_max = 0
 
-    if f1_max is None or f2_min is None:
+    if f1_max is None or f2_bornes is None:
         return Resultat(
             faisable=False,
             score=None,
@@ -377,6 +394,9 @@ def evaluer(s, groupes, aff, compat=None, blocs=None, poids=None, capacite_max=N
         "f1_max": f1_max,
         "f2_min": f2_min,
         "f2_max": f2_max,
+        "f2_bornes_blocs": {
+            bloc: {"min": lo, "max": hi} for bloc, (lo, hi) in f2_bornes.items()
+        },
         "f3_max": f3_max,
         "k": f2,
         "criteres_actifs": list(actifs),

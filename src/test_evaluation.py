@@ -112,6 +112,20 @@ def test_f2_et_poids():
     assert r4.normalises["f1"] == 1.0
     assert r4.score == 0.0
 
+    groupes5 = {"Al1": 5, "Al2": 5, "Al3": 5, "Es1": 5, "Es2": 5}
+    compat5 = {
+        e: (["Al1", "Al2", "Al3"] if s[e] == "Allemand" else ["Es1"])
+        for e in s
+    }
+    r5 = evaluer(s, groupes5, aff1, compat=compat5)
+    assert r5.criteres["f2"] == 3.0
+    assert r5.detail["f2_min"] == 3
+    assert r5.detail["f2_max"] == 4  # Es2 n'est compatible avec personne
+    assert r5.detail["f2_bornes_blocs"] == {
+        "Allemand": {"min": 2, "max": 3},
+        "Espagnol": {"min": 1, "max": 1},
+    }
+
     r_poids = evaluer(
         s, groupes4, aff1, compat=compat4,
         poids={"f1": 1.0, "f2": 0.0, "f3": 0.0},
@@ -131,7 +145,7 @@ def test_f2_et_poids():
         else:
             raise AssertionError(f"poids accepté: {mauvais}")
 
-    print("3/7 f2 et poids OK (k=3/4, renormalisation, poids invalides rejetés)")
+    print("3/7 f2 et poids OK (bornes par bloc, renormalisation, poids invalides rejetés)")
 
 
 def test_f3_inactif():
