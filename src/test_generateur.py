@@ -23,7 +23,7 @@ from generateur_instances import (
     generer_n,
 )
 from groupes import (
-    CAPACITES_DEFAUT,
+    PROFILS_CAPACITES,
     construire_groupes,
     construire_groupes_lv2,
     f1_attendu_lv2,
@@ -36,7 +36,8 @@ def prep(inst, capacite=24):
     actifs = [e for e in inst.etudiants if e.statut == "normal"]
     s = {e.id: e.lv2 for e in actifs}
     groupes = {
-        g.nom: g.capacite for g in construire_groupes_lv2(inst, capacite)
+        g.nom: g.capacite
+        for g in construire_groupes_lv2(inst, capacite, marge=0)
     }
     compat = {
         e.id: [nom for nom in groupes if nom.startswith(f"LV2_{e.lv2}_")]
@@ -76,13 +77,10 @@ def test_contrat_generateur():
     assert avec.cas_particuliers == ("cesure", "redoublant")
 
     # 4. Les groupes vivent dans un module séparé, hors instance.
-    import groupes as module_groupes
-
     assert not hasattr(inst, "groupes")
     assert "construire_groupes" not in vars(__import__("generateur_instances"))
     assert callable(construire_groupes)
-    assert construire_groupes(inst)
-    assert module_groupes.CAPACITES_DEFAUT == CAPACITES_DEFAUT
+    assert construire_groupes(inst, PROFILS_CAPACITES["standard"])
 
     # 5. Aucune capacité dans les métadonnées des instances extrêmes.
     for extreme in generer_instances_extremes(seed=0):
@@ -183,8 +181,8 @@ def test_extremes():
         meta = dict(inst.meta)
         assert set(meta) == {"categorie", "note"}, (inst.nom, set(meta))
         s, groupes, compat = prep(inst)
-        k_min = k_min_lv2(inst)
-        f1_attendu, k_calcule = f1_attendu_lv2(inst)
+        k_min = k_min_lv2(inst, 24)
+        f1_attendu, k_calcule = f1_attendu_lv2(inst, 24)
         assert k_calcule == k_min, (inst.nom, k_calcule, k_min)
 
         statut, aff, eff, ind = resoudre(s, groupes, k=k_min, compat=compat)

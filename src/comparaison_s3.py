@@ -8,6 +8,7 @@ Methodes comparees sur la meme instance reelle (septembre) :
 import sqlite3, sys, os, time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from test_cpsat import resoudre
+from groupes import Groupe
 
 GRIST = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                      "donnees", "CPB1 S1 2026-2027 - septembre - Projet 3A.grist")
@@ -29,7 +30,9 @@ con.close()
 # Filtrer : etudiants avec un TP assigne (reference non vide)
 s_ref = {eid: e["lv2"] for eid, e in etudiants.items() if e["tp_ref"] is not None and e["tp_ref"] in tp_groups}
 tp_ids = sorted(set(etudiants[eid]["tp_ref"] for eid in s_ref))
-groupes = {tp_groups[tid]["nom"]: tp_cap for tid in tp_ids}
+groupes = tuple(
+    Groupe(tp_groups[tid]["nom"], "TP", tp_cap) for tid in tp_ids
+)
 
 print("=" * 70)
 print("INSTANCE REELLE (septembre, .grist)")
@@ -48,13 +51,13 @@ for eid, tp in ((eid, etudiants[eid]["tp_ref"]) for eid in s_ref):
 # ---------- 3. Baseline naive (greedy) ----------
 def baseline_naive(s, groupes):
     """Remplissage a la volee : chaque etudiant va dans le premier groupe avec de la place."""
-    aff, eff = {}, {g: 0 for g in groupes}
+    aff, eff = {}, {g.nom: 0 for g in groupes}
     for e, lv in s.items():
         place = False
         for g in groupes:
-            if eff[g] < groupes[g]:
-                aff[e] = g
-                eff[g] += 1
+            if eff[g.nom] < g.capacite:
+                aff[e] = g.nom
+                eff[g.nom] += 1
                 place = True
                 break
         if not place:
@@ -100,7 +103,7 @@ print("-" * 70)
 # Effectifs detailles
 print("\nEffectifs par groupe :")
 print("%-12s %8s %8s %8s" % ("Groupe", "Ref", "Base", "CP-SAT"))
-for g in sorted(groupes.keys()):
+for g in sorted(g.nom for g in groupes):
     print("%-12s %8d %8d %8d" % (g, eff_ref.get(g, 0), eff_base.get(g, 0), eff_sat.get(g, 0)))
 
 # Verdict

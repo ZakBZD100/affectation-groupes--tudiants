@@ -1,0 +1,28 @@
+﻿nom,seed,effectif,allemand,espagnol,autre,choix_tardifs,cas_particuliers,categorie,note
+lot_7_000,11046410916432909206,66,29,17,20,3,cesure;redoublant,,
+lot_7_001,7322600870729951016,71,39,13,19,10,cesure;redoublant,,
+lot_7_002,968088771584700871,66,23,14,29,12,cesure;redoublant,,
+lot_7_003,284220342194256789,57,32,7,18,10,,,
+lot_7_004,904890720210125957,76,28,16,32,10,cesure;redoublant,,
+lot_7_005,15889271659697803238,67,36,16,15,8,cesure;redoublant,,
+lot_7_006,5870408127142572879,85,48,15,22,13,cesure;redoublant,,
+lot_7_007,11463122674691835141,61,29,18,14,7,cesure;redoublant,,
+lot_7_008,5256409617598562115,75,37,16,22,10,cesure;redoublant,,
+lot_7_009,10149488528073524829,53,21,13,19,12,,,
+lot_7_010,8809622960535674371,63,30,14,19,10,cesure;redoublant,,
+lot_7_011,2527081668775892184,70,30,7,33,11,cesure;redoublant,,
+lot_7_012,10703903942493797176,62,35,13,14,14,cesure;redoublant,,
+lot_7_013,8383797877943490473,74,29,12,33,23,cesure;redoublant,,
+lot_7_014,2916267770771246810,80,33,23,24,13,cesure;redoublant,,
+lot_7_015,9178130707081383343,62,30,10,22,11,cesure;redoublant,,
+lot_7_016,4054591064336052162,54,23,8,23,10,,,
+lot_7_017,5250691416012782253,77,30,17,30,8,cesure;redoublant,,
+lot_7_018,12930447154311564024,63,32,10,21,10,cesure;redoublant,,
+lot_7_019,3749577029632574763,58,18,19,21,12,,,
+extreme_borne_n50,0,50,25,9,16,0,,borne,borne de cadrage n=50
+extreme_borne_n100,0,100,40,16,44,0,,borne,borne de cadrage n=100
+extreme_une_langue_n80,0,80,80,0,0,0,,distribution,100 % Allemand
+extreme_deux_langues_n80,0,80,40,40,0,0,,distribution,50/50 Allemand/Espagnol
+extreme_minorite_n50,0,50,49,1,0,0,,distribution,49 Allemand + 1 Espagnol : un groupe entier pour un seul étudiant
+extreme_capacite_pile_n72,0,72,72,0,0,0,,capacite,72 = 3 x 24 : trois groupes exactement pleins
+extreme_capacite_depassee_n73,0,73,73,0,0,0,,capacite,"73 = 3 x 24 + 1 : k=3 infaisable, k=4 nécessaire"

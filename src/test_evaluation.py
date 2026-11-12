@@ -78,7 +78,7 @@ def test_contraintes_dures():
     inconnu_groupe = dict(aff1)
     inconnu_groupe["A1"] = "AlX"
     r = evaluer(s, groupes, inconnu_groupe, compat=compat)
-    assert not r.faisable and any("groupes inconnus" in v for v in r.violations)
+    assert not r.faisable and any("groupe inconnu" in v for v in r.violations)
 
     print("2/7 contraintes dures OK (C1 manquant/inconnu, C2, C3)")
 
@@ -188,7 +188,9 @@ def test_instance_generee():
         n=80, seed=42, avec_cas_particuliers=False, frac_choix_tardif=0.0
     )
     s = {e.id: e.lv2 for e in inst.etudiants}
-    groupes = {g.nom: g.capacite for g in construire_groupes_lv2(inst)}
+    groupes = {
+        g.nom: g.capacite for g in construire_groupes_lv2(inst, 24, marge=0)
+    }
     compat = {
         e.id: [g for g in groupes if g.startswith(f"LV2_{e.lv2}_")]
         for e in inst.etudiants
