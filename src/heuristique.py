@@ -2,8 +2,8 @@
 
 Le greedy affecte chaque étudiant au groupe ouvert le moins chargé, type par
 type, en respectant C3 (choix) et, quand TP et TD coexistent, C4 (le TD est
-celui du parent du TP). Il ne garantit pas l'optimum : c'est le CP-SAT qui
-fournit l'affectation de référence.
+celui du parent du TP) et C8 (2 TP ouverts par TD ouvert). Il ne garantit pas
+l'optimum : c'est le CP-SAT qui fournit l'affectation de référence.
 """
 import os
 import sqlite3
@@ -22,7 +22,7 @@ from test_cpsat import (  # noqa: E402
 )
 from evaluation import evaluer  # noqa: E402
 from generateur_instances import generer_lot  # noqa: E402
-from groupes import construire_groupes_lv2  # noqa: E402
+from groupes import TP_PAR_TD, construire_groupes_lv2  # noqa: E402
 
 ORDRE_TYPES = {"LV2": 0, "LV1": 1, "TP": 2, "TD": 3}
 
@@ -41,9 +41,28 @@ def greedy(s, groupes, compat=None):
         return {}, {}
     blocs, _, nb = resultat
 
+    # C8 : hiérarchie TP -> TD, exactement TP_PAR_TD TP par TD ouvert.
+    enfants = {}
+    hier = True
+    for g in groupes:
+        if g.type == "TP":
+            if g.parent is None or g.parent not in par_nom:
+                hier = False
+                break
+            enfants.setdefault(g.parent, []).append(g.nom)
+    if hier and not enfants:
+        hier = False
+    elif hier and any(
+        g.type == "TD" and len(enfants.get(g.nom, ())) < TP_PAR_TD
+        for g in groupes
+    ):
+        return {}, {}
+
     # C5a : ouvrir assez de places par bloc, les plus grosses d'abord.
     ouv = set()
     for i, bloc in enumerate(blocs):
+        if hier and bloc["type"] in ("TP", "TD"):
+            continue  # TP et TD s'ouvrent ensemble, juste après
         besoin = nb[i]
         for nom in sorted(bloc["groupes"], key=lambda n: -par_nom[n].capacite):
             if besoin <= 0:
@@ -51,6 +70,29 @@ def greedy(s, groupes, compat=None):
             ouv.add(nom)
             besoin -= par_nom[nom].capacite
         if besoin > 0:
+            return {}, {}
+
+    if hier:
+        # Un TD ne peut porter que min(C_TD, somme des capacités de ses TP)
+        # étudiants : on ouvre des TD (et leurs 2 TP) tant que tout tient.
+        couvert = 0
+        tds = sorted(
+            (g.nom for g in groupes if g.type == "TD"),
+            key=lambda n: -min(
+                par_nom[n].capacite,
+                sum(par_nom[c].capacite for c in enfants[n][:TP_PAR_TD]),
+            ),
+        )
+        for td in tds:
+            if couvert >= len(s):
+                break
+            ouv.add(td)
+            ouv.update(enfants[td][:TP_PAR_TD])
+            couvert += min(
+                par_nom[td].capacite,
+                sum(par_nom[c].capacite for c in enfants[td][:TP_PAR_TD]),
+            )
+        if couvert < len(s):
             return {}, {}
 
     types = sorted({g.type for g in groupes}, key=lambda t: ORDRE_TYPES.get(t, 9))
@@ -84,6 +126,15 @@ def greedy(s, groupes, compat=None):
                     and n in ouv
                     and eff[n] < par_nom[n].capacite
                 ]
+                if type_ == "TP" and hier:
+                    # C8 : le parent doit être ouvert et avoir de la place.
+                    candidats = [
+                        n
+                        for n in candidats
+                        if par_nom[n].parent in ouv
+                        and eff[par_nom[n].parent]
+                        < par_nom[par_nom[n].parent].capacite
+                    ]
                 if not candidats:
                     return {}, {}
                 best = min(candidats, key=lambda n: eff[n])

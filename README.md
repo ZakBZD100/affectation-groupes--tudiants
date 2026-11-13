@@ -29,8 +29,10 @@ python test_cpsat.py
 ```
 
 Modèle multi-type : C1 par type, C2, C3, C4 (TP → TD parent), C5a/C5b,
-C6/C7, objectif pondéré f1 + f2. Un test dédié rejoue le solveur sur les
-quatre profils de capacités et deux variantes aléatoires. Résultat attendu :
+C6/C7, C8 (exactement 2 TP ouverts par TD ouvert), objectif pondéré
+f1 + f2 + f3 avec les mêmes poids que l'évaluateur (1/3 chacun). Un test
+dédié rejoue le solveur sur les quatre profils de capacités et deux variantes
+aléatoires. Résultat attendu :
 
 ```
 8/8 tests passent
@@ -51,7 +53,7 @@ immuabilité, historique et instances extrêmes. Résultat attendu :
 python src/test_evaluation.py
 ```
 
-Évaluation post-hoc (C1 à C4/C5a, f1/f2/f3, normalisation, poids). Résultat
+Évaluation post-hoc (C1 à C4/C5a/C8, f1/f2/f3, normalisation, poids). Résultat
 attendu :
 
 ```
@@ -99,6 +101,23 @@ python src/export_csv.py --sans-extremes
 python src/export_csv.py --sortie C:\chemin\vers\sortie
 ```
 
+### Expériences (27 instances)
+
+```bash
+python src/experiences.py
+```
+
+Rejoue greedy et CP-SAT sur les 27 instances figées, notés par le même juge,
+puis écrit :
+
+- `exports/resultats.csv` — une ligne par instance (`k` par type, f1 normalisé
+  et score des deux méthodes, temps) ;
+- `docs/instances_tables.tex` — les tableaux inclus dans `docs/instances.pdf`.
+
+Le script calcule aussi la sensibilité aux poids (`w1`/`w2`) et compare avec
+l'affectation réelle de septembre, lue dans le fichier local `donnees/`
+(absent du dépôt).
+
 ### Banc d'essai
 
 ```bash
@@ -125,9 +144,11 @@ python src/heuristique.py
 python src/comparaison_s4.py
 ```
 
-Comparent le greedy constructif au CP-SAT avec le même juge (`evaluer`). Sur
-les 10 instances générées, les deux méthodes trouvent le même `k` et le même
-score ; le CP-SAT apporte la garantie d'optimalité, le greedy la vitesse.
+Comparent le greedy constructif au CP-SAT avec le même juge (`evaluer`). Le
+CP-SAT reçoit l'affectation greedy comme point de départ (`hint`) et minimise
+les trois critères : sur le jeu figé de 27 instances, il atteint ou dépasse le
+greedy sur le score du juge (voir `exports/resultats.csv`). Le greedy apporte
+la vitesse (≈ 2 ms), le CP-SAT l'optimisation (plafond de 10 s).
 
 ```bash
 python src/comparaison_s3.py
@@ -171,14 +192,18 @@ perturbations entières de ces profils pour tester le solveur sur des cas
 variés.
 
 Pour chaque bloc, le pool contient `ceil(N/C) + 1` groupes : le solveur peut
-en ouvrir un de plus que le minimum si l'équilibre y gagne. `k(t)` reste donc
+en ouvrir un de plus que le minimum si l'équilibre y gagne. Pour TP/TD, les
+TD sont créés en nombre suffisant pour que deux TP par TD tiennent l'effectif,
+puis chaque TD reçoit exactement deux enfants consécutifs. `k(t)` reste donc
 une décision du modèle, pas une donnée.
 
 ## TP et TD
 
 - Un TP a exactement un TD parent (C4 : `x(e, TP) ≤ x(e, TD parent)`).
-- **Aucun ratio 2:1 n'est imposé** : un TD peut porter 1, 2, 3… TP ouverts.
-  Le nombre de TP par TD est une décision du solveur, pas une constante.
+- **C8 : un TD ouvert porte exactement 2 TP ouverts** (`TP_PAR_TD = 2`,
+  constante dans `src/groupes.py`). Le pool propose `2 × #TD` TP, deux enfants
+  consécutifs par TD ; c'est le solveur qui choisit quels TD ouvrir, jamais
+  le générateur. L'évaluateur vérifie la même règle.
 - `TD = 40` et `TP = 16` sont des capacités maximales `C(g)` (contrainte C2),
   pas des effectifs cibles.
 
@@ -190,6 +215,7 @@ src/generateur_instances.py    générateur (étudiants seuls) + historique
 src/groupes.py                 profils de capacités, pool de groupes, TP/TD
 src/evaluation.py              évaluation post-hoc f1/f2/f3 et contraintes
 src/export_csv.py              export des instances figées en CSV
+src/experiences.py             campagne greedy vs CP-SAT (CSV + tableaux)
 src/test_generateur.py         tests du générateur
 src/test_evaluation.py         tests de l'évaluation
 src/test_export.py             tests de l'export
@@ -197,5 +223,10 @@ src/banc_essai.py              sensibilité au nombre de groupes
 src/heuristique.py             greedy + comparaison CP-SAT
 src/comparaison_s3.py          comparaison sur données réelles (.grist)
 src/comparaison_s4.py          comparaison greedy / CP-SAT / réel
-docs/semaine2_formalisation.pdf  formalisation (C1–C7, f1–f3)
+exports/resultats.csv          résultats des 27 instances (greedy vs CP-SAT)
+docs/semaine2_formalisation.pdf  formalisation (C1–C8, f1–f3)
+docs/instances.pdf             instances figées + analyse des expériences
+docs/soutenance.pdf            diaporama de la soutenance mi-projet
 ```
+
+Les sources LaTeX restent locales (`.gitignore`) : seuls les PDF sont poussés.

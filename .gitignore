@@ -1,3 +1,12 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+
+# confidentiel : jamais poussé
+donnees/
+
+# sources LaTeX locales : seuls les PDF sont poussés
+docs/*.tex
+docs/*.html
+docs/*.txt
+docs/Sujet/

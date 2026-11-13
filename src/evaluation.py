@@ -13,9 +13,9 @@ réalistes, puis agrégé avec des poids (uniformes par défaut) :
     score = 1 - somme_c w_c * f~_c  dans [0, 1]   (1 = parfait)
 
 Contraintes dures vérifiées : C1 (un groupe par type), C2 (capacité), C3
-(choix respecté), C4 (TP -> TD parent) et C5a (assez de places ouvertes par
-bloc). Une affectation qui les viole est rejetée : `faisable=False`,
-`score=None`, violations listées.
+(choix respecté), C4 (TP -> TD parent), C5a (assez de places ouvertes par
+bloc) et C8 (2 TP ouverts par TD ouvert). Une affectation qui les viole est
+rejetée : `faisable=False`, `score=None`, violations listées.
 
 Deux formats d'entrée sont acceptés :
 
@@ -63,13 +63,13 @@ class _G:
 class Resultat:
     """Résultat figé d'une évaluation.
 
-    faisable    : les contraintes dures C1-C4/C5a sont respectées
+    faisable    : les contraintes dures C1-C4/C5a/C8 sont respectées
     score       : 1 - coût pondéré, dans [0, 1], None si infaisable
     cout        : somme des critères normalisés pondérés, None si infaisable
     criteres    : valeurs brutes f1, f2, f3
     normalises  : valeurs f~ dans [0, 1] (0 pour un critère désactivé)
     poids       : poids effectifs après renormalisation sur les critères actifs
-    violations  : messages C1-C4/C5a si infaisable
+    violations  : messages C1-C4/C5a/C8 si infaisable
     detail      : effectifs, blocs, bornes de normalisation, k
     """
 
@@ -302,6 +302,29 @@ def _verifier(s, par_nom, aff_multi, compat, restreints, blocs):
                 f"C4: {e} est dans {tp} mais pas dans son TD parent {parent}"
             )
 
+    # C8 : exactement 2 TP ouverts par TD ouvert (même règle que le solveur).
+    enfants = {}
+    for nom, g in par_nom.items():
+        if g.type == "TP" and g.parent:
+            enfants.setdefault(g.parent, []).append(nom)
+    if enfants:
+        for g in par_nom.values():
+            if g.type != "TD":
+                continue
+            cs = enfants.get(g.nom, ())
+            if len(cs) < 2:
+                violations.append(
+                    f"C8: {g.nom} n'a que {len(cs)} TP enfants (2 attendus)"
+                )
+                continue
+            ouverts = sum(1 for c in cs if eff.get(c, 0) > 0)
+            attendu = 2 if eff.get(g.nom, 0) > 0 else 0
+            if ouverts != attendu:
+                violations.append(
+                    f"C8: {g.nom} ouvre {ouverts} TP, {attendu} attendu "
+                    "(2 par TD)"
+                )
+
     # C5a : assez de places ouvertes dans chaque bloc.
     groupes_par_bloc = {}
     for nom, bloc in blocs.items():
@@ -477,7 +500,7 @@ def evaluer(s, groupes, aff, compat=None, blocs=None, poids=None, capacite_max=N
     poids         : {"f1": w1, "f2": w2, "f3": w3}, uniformes par défaut
     capacite_max  : Cmax imposé pour f2_min ; None = max des capacités du bloc
 
-    Une affectation invalide (C1, C2, C3, C4, C5a) renvoie `faisable=False`,
+    Une affectation invalide (C1, C2, C3, C4, C5a, C8) renvoie `faisable=False`,
     `score=None` et la liste des violations.
     """
     s = dict(s)
