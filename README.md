@@ -72,6 +72,10 @@ dist\AffectationGroupes\AffectationGroupes.exe
 dist\AffectationGroupes\exports\...       (les 27 instances)
 ```
 
+**L'exe est déjà construit et livré dans le dépôt**, sur `main` et `hamza-task` :
+`dist\AffectationGroupes\AffectationGroupes.exe`. Aucun build n'est nécessaire
+pour l'utiliser.
+
 Copiez le **dossier entier** sur la machine cible : aucune installation de
 Python ni d'ortools n'est requise. Le dossier pèse environ 263 Mo : PyInstaller
 doit embarquer les DLL d'ortools/protobuf/absl (et leurs dépendances numpy,
