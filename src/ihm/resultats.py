@@ -35,31 +35,40 @@ METRIQUES = (
 )
 
 
-def exporter_solution(instance, solution, dossier):
-    """Écrit les trois CSV du projet pour la solution *affichée* (pas un re-solve)."""
+def exporter_solutions(solutions, dossier):
+    """Écrit les trois CSV du projet pour *toutes* les solutions résolues.
+
+    C'est cette fonction qui est utilisée en mode pluriel : les trois fichiers
+    contiennent une ligne par instance (et une ligne par étudiant), exactement
+    comme les exports historiques de ``exports/``.
+    """
+    solutions = [s for s in solutions if s.get("aff")]
+    if not solutions:
+        raise ValueError("aucune solution résolue à exporter")
     os.makedirs(dossier, exist_ok=True)
-    resume = instance.resume()
     chemins = {
         "instances": os.path.join(dossier, "instances.csv"),
         "etudiants": os.path.join(dossier, "etudiants.csv"),
         "resultats": os.path.join(dossier, "resultats_etudiants.csv"),
     }
-    _ecrire_csv(
-        chemins["instances"],
-        COLONNES_INSTANCES,
-        [_ligne_instance(resume, solution)],
-    )
-    _ecrire_csv(
-        chemins["etudiants"],
-        COLONNES_ETUDIANTS,
-        list(_lignes_etudiants(instance, solution)),
-    )
-    _ecrire_csv(
-        chemins["resultats"],
-        COLONNES_RESULTATS,
-        list(_lignes_resultats(instance, solution)),
-    )
+    lignes_instances = [
+        _ligne_instance(s["instance"].resume(), s) for s in solutions
+    ]
+    lignes_etudiants = []
+    lignes_resultats = []
+    for solution in solutions:
+        instance = solution["instance"]
+        lignes_etudiants.extend(_lignes_etudiants(instance, solution))
+        lignes_resultats.extend(_lignes_resultats(instance, solution))
+    _ecrire_csv(chemins["instances"], COLONNES_INSTANCES, lignes_instances)
+    _ecrire_csv(chemins["etudiants"], COLONNES_ETUDIANTS, lignes_etudiants)
+    _ecrire_csv(chemins["resultats"], COLONNES_RESULTATS, lignes_resultats)
     return chemins
+
+
+def exporter_solution(instance, solution, dossier):
+    """Écrit les trois CSV du projet pour la solution *affichée* (pas un re-solve)."""
+    return exporter_solutions([solution], dossier)
 
 
 class ResultatsFrame(ttk.LabelFrame):

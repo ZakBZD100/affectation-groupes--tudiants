@@ -30,17 +30,27 @@ L'interface de bureau utilise **le vrai solveur CP-SAT** du projet : contraireme
 python app.py
 ```
 
-Quatre onglets :
+Cinq onglets :
 
 1. **Données** — saisie manuelle d'étudiants, import CSV (`id, lv2, statut,
    choix_tardif`) ou génération aléatoire reproductible (graine `blake2b`,
    unitaire / lot / cas extrêmes).
 2. **Paramètres** — poids f1/f2/f3, profil de capacités, timeout, `k` imposé ou
    libre, marge de groupes, comparaison au greedy.
-3. **Résultats** — métriques du solveur, affectations par étudiant, groupes
+3. **Résolution lots** — choix explicite du mode :
+   - *Unitaire* : un récapitulatif affiche la source, le nom, l'effectif, la
+     graine et le profil de **l'unique instance** définie dans l'onglet Données,
+     avec un bouton « Résoudre cette instance ».
+   - *Pluriel* : coches les 27 instances du dépôt (reconstruites depuis
+     `exports/etudiants.csv`) et/ou les instances générées ; « Tout cocher »
+     sélectionne toutes les instances. Progression `i/N`, annulation, tableau
+     synthétique par instance ; un clic sur une ligne ouvre le détail dans
+     l'onglet Résultats. L'export écrit les **3 CSV groupés** (une ligne par
+     instance) dans le dossier choisi.
+4. **Résultats** — métriques du solveur, affectations par étudiant, groupes
    ouverts et comparaison greedy/CP-SAT ; export des trois CSV et d'un rapport
    JSON. La résolution tourne dans un thread, l'interface reste responsive.
-4. **Instances pré-calculées** — exploration des 27 instances de `exports/`
+5. **Instances pré-calculées** — exploration des 27 instances de `exports/`
    sans relancer le solveur.
 
 Tests des briques non graphiques :

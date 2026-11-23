@@ -48,3 +48,33 @@ def resoudre_interface(instance, params):
         "groupes": groupes,
         "evaluation": evaluation,
     }
+
+
+def resoudre_lots(instances, params, progression=None, annuler=None):
+    """Résout plusieurs instances à la suite (mode pluriel).
+
+    ``progression(i, total, instance, solution)`` est appelé après chaque
+    instance ; ``annuler()`` est testé entre deux instances. Une instance en
+    échec donne une ligne d'erreur au lieu d'interrompre tout le lot.
+    """
+    solutions = []
+    total = len(instances)
+    for index, instance in enumerate(instances, 1):
+        if annuler is not None and annuler():
+            break
+        try:
+            solution = resoudre_interface(instance, params)
+        except Exception as erreur:
+            solution = {
+                "instance": instance,
+                "statut": "ERREUR",
+                "aff": None,
+                "eff": {},
+                "ind": {"statut": "ERREUR", "erreur": str(erreur)},
+                "groupes": [],
+                "evaluation": None,
+            }
+        solutions.append(solution)
+        if progression is not None:
+            progression(index, total, instance, solution)
+    return solutions

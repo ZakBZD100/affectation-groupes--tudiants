@@ -450,3 +450,7 @@ class DonneesFrame(ttk.LabelFrame):
 
     def get_chemin_csv(self):
         return self.chemin_csv.get()
+
+    def get_instances_generees(self):
+        """Retourne les instances générées, pour la liste du mode pluriel."""
+        return list(self._instances_generees)

@@ -9,6 +9,7 @@ from tkinter import messagebox, ttk
 
 from .donnees import DonneesFrame
 from .explorateur import ExplorateurFrame
+from .lots import ResolutionLotsFrame
 from .parametres import ParametresFrame
 from .resultats import ResultatsFrame
 from .solution import resoudre_interface
@@ -30,11 +31,14 @@ class Application(tk.Tk):
         self.donnees = DonneesFrame(self.notebook, on_change=self._changement_donnees)
         self.parametres = ParametresFrame(self.notebook)
         self.resultats = ResultatsFrame(self.notebook, on_resoudre=self.resoudre)
+        self.lots = ResolutionLotsFrame(self.notebook, app=self)
         self.explorateur = ExplorateurFrame(self.notebook)
         self.notebook.add(self.donnees, text="Données")
         self.notebook.add(self.parametres, text="Paramètres")
+        self.notebook.add(self.lots, text="Résolution lots")
         self.notebook.add(self.resultats, text="Résultats")
         self.notebook.add(self.explorateur, text="Instances pré-calculées")
+        self.notebook.bind("<<NotebookTabChanged>>", self._onglet_change)
 
         self.etat = ttk.Label(
             self,
@@ -51,6 +55,14 @@ class Application(tk.Tk):
             self.etat.config(text="Instance prête : %s (%d étudiants)" % (instance.nom, instance.n))
         except ValueError:
             self.etat.config(text="En attente de données…")
+        if hasattr(self, "lots"):
+            self.lots.actualiser_unitaire()
+
+    def _onglet_change(self, _evenement=None):
+        """Rafraîchit la liste plurielle quand on entre dans l'onglet dédié."""
+        if hasattr(self, "lots") and self.notebook.select() == str(self.lots):
+            self.lots.actualiser()
+            self.lots.actualiser_unitaire()
 
     def resoudre(self):
         if self._resolution_en_cours:

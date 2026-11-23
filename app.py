@@ -24,6 +24,7 @@ def selftest():
 
     from ihm.chemins import chemin_exports
     from ihm.donnees import instance_depuis_lignes
+    from ihm.instances import lire_instances_precalculees
     from ihm.solution import resoudre_interface
 
     dossier = chemin_exports()
@@ -33,6 +34,9 @@ def selftest():
         nb_instances = len(list(csv.DictReader(fichier)))
     assert nb_instances == 27, nb_instances
     print("selftest exports OK : %s (%d instances)" % (dossier, nb_instances))
+    reconstructibles = lire_instances_precalculees()
+    assert len(reconstructibles) == 27, len(reconstructibles)
+    print("selftest mode pluriel OK : 27 instances reconstructibles")
 
     instance = instance_depuis_lignes(
         [

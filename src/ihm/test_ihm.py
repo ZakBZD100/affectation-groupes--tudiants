@@ -13,8 +13,9 @@ from export_csv import COLONNES_ETUDIANTS, COLONNES_INSTANCES, COLONNES_RESULTAT
 from generateur_instances import generer_instance  # noqa: E402
 from ihm.donnees import instance_depuis_lignes, lire_csv_etudiants  # noqa: E402
 from ihm.explorateur import lire_csv  # noqa: E402
-from ihm.resultats import exporter_solution  # noqa: E402
-from ihm.solution import resoudre_interface  # noqa: E402
+from ihm.instances import lire_instances_precalculees  # noqa: E402
+from ihm.resultats import exporter_solutions, exporter_solution  # noqa: E402
+from ihm.solution import resoudre_interface, resoudre_lots  # noqa: E402
 
 
 def test_saisie_manuelle():
@@ -33,7 +34,7 @@ def test_saisie_manuelle():
         pass
     else:
         raise AssertionError("LV2 inconnue acceptée")
-    print("1/5 saisie manuelle OK (ids 1..n, statuts, distribution)")
+    print("1/7 saisie manuelle OK (ids 1..n, statuts, distribution)")
 
 
 def test_import_csv():
@@ -49,7 +50,7 @@ def test_import_csv():
         inst = instance_depuis_lignes(lignes, nom="import")
         assert [e.id for e in inst.etudiants] == [1, 2]
         assert inst.etudiants[1].choix_tardif is True
-    print("2/5 import CSV OK (BOM, alias de colonnes, renommage des ids)")
+    print("2/7 import CSV OK (BOM, alias de colonnes, renommage des ids)")
 
 
 def test_generation_reproductible():
@@ -57,7 +58,7 @@ def test_generation_reproductible():
     b = generer_instance(n=50, seed=7)
     assert a == b
     assert generer_instance(n=50, seed=8) != a
-    print("3/5 génération blake2b reproductible OK")
+    print("3/7 génération blake2b reproductible OK")
 
 
 def test_resolution_et_exports():
@@ -96,7 +97,7 @@ def test_resolution_et_exports():
             assert len(lignes_r) == 12
             assert all(r["respecte_choix"] == "True" for r in lignes_r)
             assert all(r["td_parent"] == r["groupe_td"] for r in lignes_r)
-    print("4/5 résolution + 3 CSV OK (en-têtes, 12 lignes, C3/C4)")
+    print("4/7 résolution + 3 CSV OK (en-têtes, 12 lignes, C3/C4)")
 
 
 def test_explorateur():
@@ -104,7 +105,65 @@ def test_explorateur():
     lignes = lire_csv(chemin)
     assert len(lignes) == 27
     assert all(ligne["nom"] for ligne in lignes)
-    print("5/5 explorateur OK (27 instances lues)")
+    print("5/7 explorateur OK (27 instances lues)")
+
+
+def test_instances_precalculees():
+    candidats = lire_instances_precalculees()
+    assert len(candidats) == 27
+    for candidat in candidats:
+        instance = candidat["instance"]
+        assert instance.n == len(instance.etudiants) > 0
+        assert instance.seed is not None
+        assert candidat["source"] == "pré-calculée"
+        assert candidat["meta"].get("nom") == instance.nom
+        assert all(e.statut in ("normal", "cesure", "redoublant") for e in instance.etudiants)
+    noms = [c["instance"].nom for c in candidats]
+    assert len(set(noms)) == 27
+    print("6/7 instances pré-calculées reconstruites OK (27, uniques)")
+
+
+def test_resolution_lots_et_export_groupe():
+    instances = [
+        instance_depuis_lignes(
+            [{"lv2": "Allemand" if i % 2 else "Espagnol"} for i in range(n)],
+            nom="lot_test_%d" % n,
+            seed=n,
+        )
+        for n in (10, 12)
+    ]
+    params = {
+        "poids": {"f1": 0.3, "f2": 0.7, "f3": 0.15},
+        "profil": "standard",
+        "timeout": 10,
+        "k": None,
+        "comparer": True,
+        "marge": 1,
+    }
+    vus = []
+    solutions = resoudre_lots(
+        instances, params, progression=lambda i, total, inst, sol: vus.append((i, total, inst.nom))
+    )
+    assert len(solutions) == 2
+    assert [i for i, _t, _n in vus] == [1, 2]
+    assert all(s["aff"] for s in solutions)
+    assert resoudre_lots(instances, params, annuler=lambda: True) == []
+
+    with tempfile.TemporaryDirectory() as dossier:
+        chemins = exporter_solutions(solutions, dossier)
+        for cle, colonnes in (
+            ("instances", COLONNES_INSTANCES),
+            ("etudiants", COLONNES_ETUDIANTS),
+            ("resultats", COLONNES_RESULTATS),
+        ):
+            with open(chemins[cle], encoding="utf-8-sig", newline="") as f:
+                lecture = csv.DictReader(f)
+                assert tuple(lecture.fieldnames) == colonnes
+                if cle == "instances":
+                    assert len(list(lecture)) == 2
+                else:
+                    assert len(list(lecture)) == 22
+    print("7/7 résolution lots + export groupé OK (2 instances, 22 étudiants)")
 
 
 if __name__ == "__main__":
@@ -113,4 +172,6 @@ if __name__ == "__main__":
     test_generation_reproductible()
     test_resolution_et_exports()
     test_explorateur()
-    print("5/5 tests de l'interface passent")
+    test_instances_precalculees()
+    test_resolution_lots_et_export_groupe()
+    print("7/7 tests de l'interface passent")
