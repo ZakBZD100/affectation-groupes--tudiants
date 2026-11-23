@@ -12,9 +12,12 @@ Le modèle suit la formalisation de la semaine 2 :
     C7  pas de groupe ouvert vide
 
 Le solveur choisit k(t) : aucun nombre de groupes n'est imposé de l'extérieur.
-L'objectif est pondéré (f1 + f2, 30/70 par défaut : f2 est prioritaire), avec
-une normalisation entière exacte. Les groupes sont des `groupes.Groupe` (nom, type, capacité,
-parent) ; un dict {nom: capacité} reste accepté pour la compatibilité.
+L'objectif est pondéré (f1 + f2 + f3, 0.3/0.7/0.15 par défaut : f2 est
+prioritaire), avec une normalisation entière exacte. f3 est modélisé par des
+variables booléennes « paire de groupes de types différents partageant un
+étudiant », ce qui aligne le solveur sur le juge `evaluation.evaluer`. Les
+groupes sont des `groupes.Groupe` (nom, type, capacité, parent) ; un dict
+{nom: capacité} reste accepté pour la compatibilité.
 """
 import math
 import os
@@ -27,7 +30,7 @@ from ortools.sat.python import cp_model
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "src"))
 from groupes import Groupe, groupes_par_type  # noqa: E402
 
-POIDS_DEFAUT = {"f1": 0.3, "f2": 0.7}
+POIDS_DEFAUT = {"f1": 0.3, "f2": 0.7, "f3": 0.15}
 
 
 # ---------------------------------------------------------------------------
@@ -244,39 +247,46 @@ def _remplissage(eff, ouv, par_nom):
     }
 
 
-def _coefficients(poids, f1_max_int, f2_min, f2_max):
-    """Coefficients entiers de l'objectif pondéré f1 + f2.
+def _coefficients(poids, f1_max_int, f2_min, f2_max, f3_max_int):
+    """Coefficients entiers de l'objectif pondéré f1 + f2 + f3.
 
-    Retourne (A, B) tels que minimiser A*F1_INT + B*sum(y) soit équivalent à
-    minimiser w1*f1~ + w2*f2~. (0, 0) = aucun critère actif.
+    Retourne (A, B, C) tels que minimiser A*F1_INT + B*sum(y) + C*sum(z) soit
+    équivalent à minimiser w1*f1~ + w2*f2~ + w3*f3~. (0, 0, 0) = aucun critère
+    actif (par exemple en mono-type LV2, où f3 est dégénéré).
     """
-    w1 = Fraction(str(poids.get("f1", 0.0))).limit_denominator(10000)
-    w2 = Fraction(str(poids.get("f2", 0.0))).limit_denominator(10000)
-    if w1 < 0 or w2 < 0:
+    w = {
+        c: Fraction(str(poids.get(c, 0.0))).limit_denominator(10000)
+        for c in ("f1", "f2", "f3")
+    }
+    if any(valeur < 0 for valeur in w.values()):
         raise ValueError("les poids doivent être >= 0")
-    if w1 == 0 and w2 == 0:
+    if sum(w.values()) == 0:
         raise ValueError("la somme des poids doit être > 0")
 
-    f1_actif = f1_max_int > 0 and w1 > 0
-    f2_actif = f2_max > f2_min and w2 > 0
-    if not f1_actif and not f2_actif:
-        return 0, 0
+    actif = {
+        "f1": f1_max_int > 0 and w["f1"] > 0,
+        "f2": f2_max > f2_min and w["f2"] > 0,
+        "f3": f3_max_int > 0 and w["f3"] > 0,
+    }
+    if not any(actif.values()):
+        return 0, 0, 0
 
-    denom = math.lcm(w1.denominator, w2.denominator)
-    a = w1.numerator * (denom // w1.denominator)
-    b = w2.numerator * (denom // w2.denominator)
-    # Un critère dégénéré ne doit pas annuler l'échelle de l'autre.
-    delta_f1 = f1_max_int if f1_max_int > 0 else 1
-    delta_f2 = f2_max - f2_min if f2_max > f2_min else 1
-    A = a * delta_f2 if f1_actif else 0
-    B = b * delta_f1 if f2_actif else 0
-    return A, B
+    denom = math.lcm(*(valeur.denominator for valeur in w.values()))
+    p = {c: valeur.numerator * (denom // valeur.denominator) for c, valeur in w.items()}
+    # Un critère dégénéré ne doit pas annuler l'échelle des autres.
+    d1 = f1_max_int if f1_max_int > 0 else 1
+    d2 = f2_max - f2_min if f2_max > f2_min else 1
+    d3 = f3_max_int if f3_max_int > 0 else 1
+    A = p["f1"] * d2 * d3 if actif["f1"] else 0
+    B = p["f2"] * d1 * d3 if actif["f2"] else 0
+    C = p["f3"] * d1 * d2 if actif["f3"] else 0
+    return A, B, C
 
 
 # ---------------------------------------------------------------------------
 # Modèle
 # ---------------------------------------------------------------------------
-def bati(s, groupes, a, blocs, nb, k=None, poids=None):
+def bati(s, groupes, a, blocs, nb, k=None, avec_f3=True):
     m = cp_model.CpModel()
     N = len(s)
     par_nom = {g.nom: g for g in groupes}
@@ -320,6 +330,23 @@ def bati(s, groupes, a, blocs, nb, k=None, poids=None):
     if k is not None:
         m.Add(sum(y.values()) == k)
 
+    # f3 : paires de groupes de types différents partageant un étudiant.
+    # Clause SAT (¬x(e,g1) ∨ ¬x(e,g2) ∨ z) : z minimiseur prend exactement
+    # la valeur de l'OR sur les étudiants admis dans les deux groupes.
+    z = {}
+    if avec_f3:
+        for i, g1 in enumerate(groupes):
+            for g2 in groupes[i + 1:]:
+                if g1.type == g2.type:
+                    continue
+                cle = (g1.nom, g2.nom)
+                zz = m.NewBoolVar("f3_%s_%s" % cle)
+                z[cle] = zz
+                for e in s:
+                    if g1.nom in a[e] and g2.nom in a[e]:
+                        # clause SAT : z ou non x(e,g1) ou non x(e,g2)
+                        m.AddBoolOr([x[e, g1.nom].Not(), x[e, g2.nom].Not(), zz])
+
     # f1 intra-bloc : sum_g |k_b n(g) - N_b|, groupes ouverts seulement
     ec_par_bloc = []
     for idx, bloc in enumerate(blocs):
@@ -331,10 +358,10 @@ def bati(s, groupes, a, blocs, nb, k=None, poids=None):
             p = m.NewIntVar(0, N * len(bloc["groupes"]), "p%d_%s" % (idx, nom))
             zs = []
             for h in bloc["groupes"]:
-                z = m.NewIntVar(0, N, "z%d_%s_%s" % (idx, nom, h))
-                m.Add(z == 0).OnlyEnforceIf(y[h].Not())
-                m.Add(z == n[nom]).OnlyEnforceIf(y[h])
-                zs.append(z)
+                zh = m.NewIntVar(0, N, "z%d_%s_%s" % (idx, nom, h))
+                m.Add(zh == 0).OnlyEnforceIf(y[h].Not())
+                m.Add(zh == n[nom]).OnlyEnforceIf(y[h])
+                zs.append(zh)
             m.Add(p == sum(zs))
             v = m.NewIntVar(0, N * len(bloc["groupes"]), "v%d_%s" % (idx, nom))
             m.Add(v >= p - nb[idx]).OnlyEnforceIf(y[nom])
@@ -343,18 +370,20 @@ def bati(s, groupes, a, blocs, nb, k=None, poids=None):
             ecs.append(v)
         ec_par_bloc.append(ecs)
 
-    return m, x, y, n, ec_par_bloc
+    return m, x, y, n, ec_par_bloc, z
 
 
-def resoudre(s, groupes, k=None, compat=None, poids=None, comparer=False):
+def resoudre(s, groupes, k=None, compat=None, poids=None, comparer=False,
+             timeout=None):
     """Résout l'affectation multi-type et renvoie (statut, aff, eff, ind).
 
     s        : {étudiant: LV2}
     groupes  : séquence de `Groupe` (ou dict {nom: capacité})
     k        : nombre total de groupes ouverts imposé (None = choisi)
     compat   : {étudiant: [groupes autorisés]} (C3)
-    poids    : {"f1": w1, "f2": w2}, 30/70 par défaut (f2 prioritaire)
+    poids    : {"f1": w1, "f2": w2, "f3": w3}, 0.3/0.7/0.15 par défaut
     comparer : si True, calcule aussi l'écart de score avec le greedy
+    timeout  : limite de temps en secondes (10 par défaut)
     """
     poids = dict(POIDS_DEFAUT, **(poids or {}))
     groupes = _normaliser_groupes(groupes)
@@ -378,21 +407,31 @@ def resoudre(s, groupes, k=None, compat=None, poids=None, comparer=False):
         return cp_model.INFEASIBLE, {}, {}, {}
     f2_min = _f2_min(blocs, nb, par_nom)
     f2_max = sum(len(bloc["groupes"]) for bloc in blocs)
-    A, B = _coefficients(poids, f1_max_int, f2_min, f2_max)
+    f3_max_int = sum(
+        1
+        for i, g1 in enumerate(groupes)
+        for g2 in groupes[i + 1:]
+        if g1.type != g2.type
+    )
+    avec_f3 = poids.get("f3", 0) > 0
+    A, B, C = _coefficients(poids, f1_max_int, f2_min, f2_max, f3_max_int)
 
-    m, x, y, n, ec_par_bloc = bati(s, groupes, a, blocs, nb, k, poids)
+    m, x, y, n, ec_par_bloc, z = bati(
+        s, groupes, a, blocs, nb, k, avec_f3=avec_f3
+    )
 
-    if A or B:
+    if A or B or C:
         f1_int = sum(
             (L // nb[idx]) * v
             for idx, ecs in enumerate(ec_par_bloc)
             if nb[idx] > 0
             for v in ecs
         )
-        m.Minimize(A * f1_int + B * sum(y.values()))
+        m.Minimize(A * f1_int + B * sum(y.values()) + C * sum(z.values()))
 
     solver = cp_model.CpSolver()
-    solver.parameters.max_time_in_seconds = 10
+    solver.parameters.max_time_in_seconds = 10 if timeout is None else timeout
+    solver.parameters.random_seed = 7
     t_solve = time.perf_counter()
     statut = solver.Solve(m)
     temps_s = time.perf_counter() - t_solve
@@ -430,17 +469,6 @@ def resoudre(s, groupes, k=None, compat=None, poids=None, comparer=False):
         (k_total - f2_min) / (f2_max - f2_min) if f2_max > f2_min else 0.0
     )
 
-    w1 = float(poids.get("f1", 0.0))
-    w2 = float(poids.get("f2", 0.0))
-    if f1_max_int > 0 and f2_max > f2_min:
-        score = 1.0 - (w1 * f1_norm + w2 * f2_norm) / (w1 + w2)
-    elif f1_max_int > 0:
-        score = 1.0 - f1_norm
-    elif f2_max > f2_min:
-        score = 1.0 - f2_norm
-    else:
-        score = 1.0
-
     aff = {}
     for e in s:
         affectation = {}
@@ -456,8 +484,28 @@ def resoudre(s, groupes, k=None, compat=None, poids=None, comparer=False):
     remplissage = _remplissage(eff, noms_ouverts, par_nom)
     f3, f3_max = _f3_multi(s, aff, par_nom, types)
     f3_norm = f3 / f3_max if f3_max > 0 else 0.0
-    objectif = solver.ObjectiveValue() if A or B else 0
-    borne = solver.BestObjectiveBound() if A or B else 0
+
+    # Score sur les trois critères, avec les mêmes poids que l'objectif.
+    w = {c: float(poids.get(c, 0.0)) for c in ("f1", "f2", "f3")}
+    normes = {"f1": f1_norm, "f2": f2_norm, "f3": f3_norm}
+    actifs = [
+        c
+        for c, disponible in (
+            ("f1", f1_max_int > 0),
+            ("f2", f2_max > f2_min),
+            ("f3", f3_max > 0),
+        )
+        if disponible and w[c] > 0
+    ]
+    total_poids = sum(w[c] for c in actifs)
+    score = (
+        1.0 - sum(w[c] * normes[c] for c in actifs) / total_poids
+        if total_poids
+        else 1.0
+    )
+
+    objectif = solver.ObjectiveValue() if A or B or C else 0
+    borne = solver.BestObjectiveBound() if A or B or C else 0
     ecart = 0.0 if objectif == 0 else abs(objectif - borne) / abs(objectif)
 
     ind = {
@@ -503,6 +551,7 @@ def resoudre(s, groupes, k=None, compat=None, poids=None, comparer=False):
             "faisable": r_g.faisable,
             "k": r_g.detail["k"] if r_g.faisable else None,
             "f1": r_g.criteres["f1"] if r_g.faisable else None,
+            "f3": r_g.criteres["f3"] if r_g.faisable else None,
             "score": r_g.score,
         }
         if r_g.faisable and r_c.faisable:
@@ -596,8 +645,11 @@ def test_instance_multi_type():
         ]
         for e in etudiants
     }
-    statut, aff, eff, ind = resoudre(s, groupes, compat=compat)
+    statut, aff, eff, ind = resoudre(s, groupes, compat=compat, comparer=True)
     assert statut in (cp_model.OPTIMAL, cp_model.FEASIBLE), statut
+    assert 0 <= ind["f3"] <= ind["f3_max"]
+    assert 0.0 <= ind["f3_norm"] <= 1.0
+    assert ind["greedy"]["f3"] is not None
     assert len(aff) == 75
     for e in s:
         assert set(aff[e]) == {"LV2", "LV1", "TP", "TD"}, aff[e]
@@ -626,7 +678,12 @@ def test_indicateurs():
     statut, aff, eff, ind = resoudre(s, groupes)
     assert statut == cp_model.OPTIMAL and sorted(eff.values()) == [3, 4, 4], eff
     assert ind["f1"] == 4 and ind["f1_norm"] == 0.25 and ind["maxmin"] == 1, ind
-    print("7/8 indicateurs : 3/4/4, f1=4, f1_norm=0.25, max-min=1")
+    avec, sans = (
+        _coefficients({"f1": 0.3, "f2": 0.7, "f3": 0.15}, 100, 10, 20, 150),
+        _coefficients({"f1": 0.3, "f2": 0.7, "f3": 0.0}, 100, 10, 20, 150),
+    )
+    assert len(avec) == len(sans) == 3 and avec[2] > 0 and sans[2] == 0
+    print("7/8 indicateurs : 3/4/4, f1=4, f1_norm=0.25, max-min=1, f3 dans l'objectif")
 
 
 def test_profils_capacites():

@@ -30,7 +30,8 @@ python test_cpsat.py
 ```
 
 Modèle multi-type : C1 par type, C2, C3, C4 (TP → TD parent), C5a/C5b,
-C6/C7, objectif pondéré f1 + f2 (**30/70**, f2 prioritaire). Un test dédié
+C6/C7, objectif pondéré f1 + f2 + f3 (**0.3/0.7/0.15**, f2 prioritaire, f3
+modélisé par des paires de groupes partageant un étudiant). Un test dédié
 rejoue le solveur sur les quatre profils de capacités et deux variantes
 aléatoires. Résultat attendu :
 
@@ -105,12 +106,19 @@ Options :
 python src/export_csv.py --lot 30 --seed 11
 python src/export_csv.py --sans-extremes
 python src/export_csv.py --sans-solution   # entrées seules, sans solveur
+python src/export_csv.py --timeout 60      # 60 s par instance (défaut : 30 s)
 python src/export_csv.py --sortie C:\chemin\vers\sortie
 ```
 
 Les 80 étudiants « cas particuliers » (cesure, redoublant) ne sont pas
 affectés : ils apparaissent dans les trois fichiers avec
 `statut_affectation = non_affecte_cas_particulier` et des groupes vides.
+
+Les instances sont reproductibles (graines dérivées par `blake2b`), mais pas
+les affectations : CP-SAT utilise ses workers automatiques, plus rapides que
+le mode mono-worker (qui ne trouvait aucune solution sur ces instances). Deux
+exécutions peuvent donc différer sur les groupes et sur `f3`, à `k`, `f1` et
+score constants.
 
 ### Métriques affichées après le solveur
 
@@ -126,8 +134,18 @@ et `afficher_metriques(ind)` les affiche en quatre blocs :
 
 Le `gap` est calculé à partir de `ObjectiveValue()` et `BestObjectiveBound()`
 (les méthodes `Gap()`, `NumVariables()` et `NumConstraints()` ne sont pas
-disponibles dans la version d'ortools installée). Le score de l'évaluateur
-(`score_evaluateur` dans l'export) utilise les poids 0.25/0.60/0.15.
+disponibles dans la version d'ortools installée). Le `score` du solveur
+utilise les mêmes trois critères que son objectif (0.3/0.7/0.15) ; le score de
+l'évaluateur (`score_evaluateur` dans l'export) utilise 0.25/0.60/0.15. Les
+deux scores ne sont donc pas strictement identiques, mais ils incluent tous
+les deux f3 : on peut comparer un delta `delta_score_greedy` calculé par
+l'évaluateur entre CP-SAT et le greedy sur la même instance.
+
+Avec `--timeout 30`, toutes les instances exportées sont `FEASIBLE` (aucune
+optimalité prouvée, gap maximal ~8,5 %). Un `delta_score_greedy` négatif peut
+donc subsister : il signifie seulement que le greedy a trouvé une meilleure
+solution dans le temps imparti, pas que les objectifs divergent. Augmenter le
+timeout (ou fournir un meilleur point de départ) réduit ce cas.
 
 ### Banc d'essai
 

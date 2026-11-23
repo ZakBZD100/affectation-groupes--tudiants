@@ -16,7 +16,12 @@ affiche correctement les accents sans réglage supplémentaire.
 Exécution :
     python src/export_csv.py
     python src/export_csv.py --lot 30 --seed 11 --sans-extremes
+    python src/export_csv.py --timeout 60      # plus de temps par instance
     python src/export_csv.py --sans-solution   # export des entrées seulement
+
+Les instances sont reproductibles (graines dérivées par blake2b), mais les
+affectations peuvent varier d'une exécution à l'autre : CP-SAT utilise ses
+workers automatiques pour rester rapide.
 """
 from __future__ import annotations
 
@@ -128,7 +133,7 @@ def construire_historique(nb_lot=20, seed=7, avec_extremes=True):
     return HISTORIQUE
 
 
-def resoudre_instance(instance):
+def resoudre_instance(instance, timeout=None):
     """Résout une instance figée et retourne le contexte complet."""
     actifs = [e for e in instance.etudiants if e.statut == "normal"]
     s = {e.id: e.lv2 for e in actifs}
@@ -141,7 +146,9 @@ def resoudre_instance(instance):
         ]
         for e in actifs
     }
-    statut, aff, eff, ind = resoudre(s, groupes, compat=compat, comparer=True)
+    statut, aff, eff, ind = resoudre(
+        s, groupes, compat=compat, comparer=True, timeout=timeout
+    )
     r_eval = evaluer(s, groupes, aff, compat=compat) if aff else None
     return {
         "instance": instance,
@@ -292,7 +299,7 @@ def _ecrire_csv(chemin, colonnes, lignes):
         writer.writerows(lignes)
 
 
-def exporter(historique=None, sortie=None, avec_solution=True):
+def exporter(historique=None, sortie=None, avec_solution=True, timeout=None):
     """Écrit les trois CSV et retourne leurs chemins."""
     historique = HISTORIQUE if historique is None else historique
     sortie = os.path.join(RACINE, "exports") if sortie is None else sortie
@@ -301,7 +308,7 @@ def exporter(historique=None, sortie=None, avec_solution=True):
     solutions = {}
     for instance in historique.lister():
         solutions[instance.nom] = (
-            resoudre_instance(instance) if avec_solution else None
+            resoudre_instance(instance, timeout) if avec_solution else None
         )
 
     resume_par_nom = {r["nom"]: r for r in historique.tableau()}
@@ -337,6 +344,12 @@ def main(argv=None):
     parser.add_argument("--lot", type=int, default=20, help="nombre d'instances du lot")
     parser.add_argument("--seed", type=int, default=7, help="graine du lot")
     parser.add_argument(
+        "--timeout",
+        type=float,
+        default=30,
+        help="temps maximal en secondes par instance (défaut : 30)",
+    )
+    parser.add_argument(
         "--sans-extremes",
         action="store_true",
         help="ne pas inclure les instances extrêmes",
@@ -357,7 +370,10 @@ def main(argv=None):
         nb_lot=args.lot, seed=args.seed, avec_extremes=not args.sans_extremes
     )
     chemins = exporter(
-        historique, args.sortie, avec_solution=not args.sans_solution
+        historique,
+        args.sortie,
+        avec_solution=not args.sans_solution,
+        timeout=args.timeout,
     )
 
     print(
