@@ -6,3 +6,12 @@ dist/
 *.spec
 *.egg-info/
 .venv/
+
+# confidentiel : jamais pousse
+donnees/
+
+# sources LaTeX locales : seuls les PDF sont pousses
+docs/*.tex
+docs/*.html
+docs/*.txt
+docs/Sujet/
