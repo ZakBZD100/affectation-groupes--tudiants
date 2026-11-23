@@ -8,13 +8,14 @@ les critères souples du PDF `semaine2_formalisation` :
     f3 : conflits de parallélisation entre types
 
 Chaque critère est normalisé dans [0, 1] entre un minimum et un maximum
-réalistes, puis agrégé avec des poids (uniformes par défaut) :
+réalistes, puis agrégé avec des poids (f2 majoritaire par défaut) :
 
     score = 1 - somme_c w_c * f~_c  dans [0, 1]   (1 = parfait)
 
 Contraintes dures vérifiées : C1 (un groupe par type), C2 (capacité), C3
 (choix respecté), C4 (TP -> TD parent), C5a (assez de places ouvertes par
-bloc) et C8 (2 TP ouverts par TD ouvert). Une affectation qui les viole est
+bloc) et C8 (`tp_par_td` TP ouverts par TD ouvert — règle de l'établissement,
+transmise en paramètre, défaut 2). Une affectation qui les viole est
 rejetée : `faisable=False`, `score=None`, violations listées.
 
 Deux formats d'entrée sont acceptés :
@@ -44,8 +45,11 @@ import math
 from dataclasses import dataclass
 from math import ceil
 
+from groupes import TP_PAR_TD  # règle de l'établissement (C8), défaut 2
+
 CRITERES = ("f1", "f2", "f3")
-POIDS_DEFAUT = {"f1": 1.0 / 3.0, "f2": 1.0 / 3.0, "f3": 1.0 / 3.0}
+# Pondération : f2 (nb de groupes) majoritaire, f1 et f3 à égalité.
+POIDS_DEFAUT = {"f1": 0.25, "f2": 0.5, "f3": 0.25}
 BLOC_GLOBAL = "__global__"
 
 
@@ -240,7 +244,7 @@ def _effectifs(aff_multi):
     return eff
 
 
-def _verifier(s, par_nom, aff_multi, compat, restreints, blocs):
+def _verifier(s, par_nom, aff_multi, compat, restreints, blocs, tp_par_td=TP_PAR_TD):
     violations = []
     types_presents = sorted({g.type for g in par_nom.values()})
 
@@ -302,7 +306,8 @@ def _verifier(s, par_nom, aff_multi, compat, restreints, blocs):
                 f"C4: {e} est dans {tp} mais pas dans son TD parent {parent}"
             )
 
-    # C8 : exactement 2 TP ouverts par TD ouvert (même règle que le solveur).
+    # C8 : exactement tp_par_td TP ouverts par TD ouvert (règle de
+    # l'établissement, paramètre — même valeur que le solveur).
     enfants = {}
     for nom, g in par_nom.items():
         if g.type == "TP" and g.parent:
@@ -312,17 +317,18 @@ def _verifier(s, par_nom, aff_multi, compat, restreints, blocs):
             if g.type != "TD":
                 continue
             cs = enfants.get(g.nom, ())
-            if len(cs) < 2:
+            if len(cs) < tp_par_td:
                 violations.append(
-                    f"C8: {g.nom} n'a que {len(cs)} TP enfants (2 attendus)"
+                    f"C8: {g.nom} n'a que {len(cs)} TP enfants "
+                    f"({tp_par_td} attendus)"
                 )
                 continue
             ouverts = sum(1 for c in cs if eff.get(c, 0) > 0)
-            attendu = 2 if eff.get(g.nom, 0) > 0 else 0
+            attendu = tp_par_td if eff.get(g.nom, 0) > 0 else 0
             if ouverts != attendu:
                 violations.append(
                     f"C8: {g.nom} ouvre {ouverts} TP, {attendu} attendu "
-                    "(2 par TD)"
+                    f"({tp_par_td} par TD)"
                 )
 
     # C5a : assez de places ouvertes dans chaque bloc.
@@ -489,7 +495,16 @@ def _agreger(criteres, bornes, poids):
 # ---------------------------------------------------------------------------
 # API publique
 # ---------------------------------------------------------------------------
-def evaluer(s, groupes, aff, compat=None, blocs=None, poids=None, capacite_max=None):
+def evaluer(
+    s,
+    groupes,
+    aff,
+    compat=None,
+    blocs=None,
+    poids=None,
+    capacite_max=None,
+    tp_par_td=TP_PAR_TD,
+):
     """Évalue une affectation et renvoie un `Resultat` avec un score dans [0, 1].
 
     s             : {étudiant: LV2}
@@ -497,8 +512,9 @@ def evaluer(s, groupes, aff, compat=None, blocs=None, poids=None, capacite_max=N
     aff           : {e: {type: groupe}} (multi-type) ou {e: groupe} (mono-type)
     compat        : {étudiant: [groupes autorisés]} (C3) ; None = tous
     blocs         : {nom_groupe: bloc} ; None = inféré depuis les types/compat
-    poids         : {"f1": w1, "f2": w2, "f3": w3}, uniformes par défaut
+    poids         : {"f1": w1, "f2": w2, "f3": w3}, f2 majoritaire par défaut
     capacite_max  : Cmax imposé pour f2_min ; None = max des capacités du bloc
+    tp_par_td     : TP ouverts par TD ouvert (C8, règle établissement)
 
     Une affectation invalide (C1, C2, C3, C4, C5a, C8) renvoie `faisable=False`,
     `score=None` et la liste des violations.
@@ -521,7 +537,7 @@ def evaluer(s, groupes, aff, compat=None, blocs=None, poids=None, capacite_max=N
     }
 
     violations, eff = _verifier(
-        s, par_nom, aff_multi, compat, restreints, blocs
+        s, par_nom, aff_multi, compat, restreints, blocs, tp_par_td
     )
     if violations:
         return Resultat(

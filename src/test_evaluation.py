@@ -114,7 +114,9 @@ def test_f2_et_poids():
     assert r.detail["f2_min"] == 3
     assert r.detail["f2_max"] == 4
     assert r.normalises["f2"] == 0.0
-    assert r.poids["f1"] == 0.5 and r.poids["f2"] == 0.5
+    # Poids renormalisés sur les critères actifs : f2 majoritaire (0,5/0,75
+    # = 2/3) et f1 (0,25/0,75 = 1/3) ; f3 est inactif sur ce cas mono-type.
+    assert r.poids["f1"] == 1.0 / 3.0 and r.poids["f2"] == 2.0 / 3.0
     assert r.score == 1.0
 
     aff4 = {

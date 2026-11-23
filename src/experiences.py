@@ -79,6 +79,8 @@ def ligne_resultats(inst):
         "k_tp": r_c.detail["k_par_type"].get("TP", 0),
         "f1n_g": round(r_g.normalises["f1"], 3),
         "f1n_c": round(r_c.normalises["f1"], 3),
+        "f2n_g": round(r_g.normalises["f2"], 3),
+        "f2n_c": round(r_c.normalises["f2"], 3),
         "f3n_g": round(r_g.normalises["f3"], 3),
         "f3n_c": round(r_c.normalises["f3"], 3),
         "score_g": round(r_g.score, 3),
@@ -166,6 +168,7 @@ def lignes_reelles():
                 "k": r.detail["k"],
                 "f1": round(r.criteres["f1"], 3),
                 "f1n": round(r.normalises["f1"], 3),
+                "f2n": round(r.normalises["f2"], 3),
                 "maxmin": max(
                     v for v in r.detail["effectifs"].values() if v > 0
                 )
@@ -260,11 +263,12 @@ def ecrire_latex(instances, resultats, poids, reelles, chemin):
         _tableau(
             "Résultats : note du juge (greedy vs CP-SAT, profil standard)",
             ("Instance", "$\\tilde f_1$ g", "$\\tilde f_1$ c",
+             "$\\tilde f_2$ g", "$\\tilde f_2$ c",
              "score g", "score c", "$t_g$", "$t_c$"),
-            ("l", "r", "r", "r", "r", "r", "r"),
+            ("l", "r", "r", "r", "r", "r", "r", "r", "r"),
             [
-                (r["nom"], r["f1n_g"], r["f1n_c"], r["score_g"],
-                 r["score_c"], r["t_g"], r["t_c"])
+                (r["nom"], r["f1n_g"], r["f1n_c"], r["f2n_g"], r["f2n_c"],
+                 r["score_g"], r["score_c"], r["t_g"], r["t_c"])
                 for r in resultats
             ],
         )
@@ -283,11 +287,12 @@ def ecrire_latex(instances, resultats, poids, reelles, chemin):
     blocs.append(
         _tableau(
             "Instance réelle de septembre : 62 étudiants, 4 TP de capacité 16",
-            ("Méthode", "$k$", "$f_1$", "$\\tilde f_1$", "max$-$min",
-             "score", "$t$ (s)"),
-            ("l", "r", "r", "r", "r", "r", "r"),
+            ("Méthode", "$k$", "$f_1$", "$\\tilde f_1$", "$\\tilde f_2$",
+             "max$-$min", "score", "$t$ (s)"),
+            ("l", "r", "r", "r", "r", "r", "r", "r"),
             [
                 (r["methode"], r["k"], r["f1"], str(r["f1n"]).replace(".", "{,}"),
+                 str(r["f2n"]).replace(".", "{,}"),
                  r["maxmin"], str(r["score"]).replace(".", "{,}"), r["t"])
                 for r in reelles
             ],

@@ -2,7 +2,8 @@
 
 Le greedy affecte chaque étudiant au groupe ouvert le moins chargé, type par
 type, en respectant C3 (choix) et, quand TP et TD coexistent, C4 (le TD est
-celui du parent du TP) et C8 (2 TP ouverts par TD ouvert). Il ne garantit pas
+celui du parent du TP) et C8 (`tp_par_td` TP ouverts par TD ouvert, règle de
+l'établissement transmise en paramètre). Il ne garantit pas
 l'optimum : c'est le CP-SAT qui fournit l'affectation de référence.
 """
 import os
@@ -27,7 +28,7 @@ from groupes import TP_PAR_TD, construire_groupes_lv2  # noqa: E402
 ORDRE_TYPES = {"LV2": 0, "LV1": 1, "TP": 2, "TD": 3}
 
 
-def greedy(s, groupes, compat=None):
+def greedy(s, groupes, compat=None, tp_par_td=TP_PAR_TD):
     """Affectation gloutonne multi-type. Retourne (aff, eff) ou ({}, {})."""
     groupes = _normaliser_groupes(groupes)
     if not groupes:
@@ -41,7 +42,7 @@ def greedy(s, groupes, compat=None):
         return {}, {}
     blocs, _, nb = resultat
 
-    # C8 : hiérarchie TP -> TD, exactement TP_PAR_TD TP par TD ouvert.
+    # C8 : hiérarchie TP -> TD, exactement tp_par_td TP par TD ouvert.
     enfants = {}
     hier = True
     for g in groupes:
@@ -53,7 +54,7 @@ def greedy(s, groupes, compat=None):
     if hier and not enfants:
         hier = False
     elif hier and any(
-        g.type == "TD" and len(enfants.get(g.nom, ())) < TP_PAR_TD
+        g.type == "TD" and len(enfants.get(g.nom, ())) < tp_par_td
         for g in groupes
     ):
         return {}, {}
@@ -74,23 +75,23 @@ def greedy(s, groupes, compat=None):
 
     if hier:
         # Un TD ne peut porter que min(C_TD, somme des capacités de ses TP)
-        # étudiants : on ouvre des TD (et leurs 2 TP) tant que tout tient.
+        # étudiants : on ouvre des TD (et leurs TP) tant que tout tient.
         couvert = 0
         tds = sorted(
             (g.nom for g in groupes if g.type == "TD"),
             key=lambda n: -min(
                 par_nom[n].capacite,
-                sum(par_nom[c].capacite for c in enfants[n][:TP_PAR_TD]),
+                sum(par_nom[c].capacite for c in enfants[n][:tp_par_td]),
             ),
         )
         for td in tds:
             if couvert >= len(s):
                 break
             ouv.add(td)
-            ouv.update(enfants[td][:TP_PAR_TD])
+            ouv.update(enfants[td][:tp_par_td])
             couvert += min(
                 par_nom[td].capacite,
-                sum(par_nom[c].capacite for c in enfants[td][:TP_PAR_TD]),
+                sum(par_nom[c].capacite for c in enfants[td][:tp_par_td]),
             )
         if couvert < len(s):
             return {}, {}

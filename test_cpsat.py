@@ -30,7 +30,7 @@ from ortools.sat.python import cp_model
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "src"))
 from groupes import Groupe, TP_PAR_TD, groupes_par_type  # noqa: E402
 
-POIDS_DEFAUT = {"f1": 1.0 / 3.0, "f2": 1.0 / 3.0, "f3": 1.0 / 3.0}
+POIDS_DEFAUT = {"f1": 0.25, "f2": 0.5, "f3": 0.25}
 
 
 # ---------------------------------------------------------------------------
@@ -253,7 +253,7 @@ def _coefficients(poids, bornes):
 # ---------------------------------------------------------------------------
 # Modèle
 # ---------------------------------------------------------------------------
-def bati(s, groupes, a, blocs, nb, k=None, poids=None):
+def bati(s, groupes, a, blocs, nb, k=None, poids=None, tp_par_td=TP_PAR_TD):
     m = cp_model.CpModel()
     N = len(s)
     par_nom = {g.nom: g for g in groupes}
@@ -286,7 +286,8 @@ def bati(s, groupes, a, blocs, nb, k=None, poids=None):
             for e in s:
                 m.Add(x[e, g.nom] <= x[e, g.parent])
 
-    # C8 : exactement TP_PAR_TD TP ouverts par TD ouvert.
+    # C8 : exactement tp_par_td TP ouverts par TD ouvert (règle de
+    # l'établissement, transmise en paramètre — jamais codée en dur).
     enfants = {}
     for g in groupes:
         if g.type == "TP" and g.parent is not None:
@@ -296,12 +297,12 @@ def bati(s, groupes, a, blocs, nb, k=None, poids=None):
             if g.type != "TD":
                 continue
             cs = enfants.get(g.nom, ())
-            if len(cs) < TP_PAR_TD:
+            if len(cs) < tp_par_td:
                 raise ValueError(
                     f"{g.nom} n'a que {len(cs)} TP enfants "
-                    f"(il en faut {TP_PAR_TD} pour C8)"
+                    f"(il en faut {tp_par_td} pour C8)"
                 )
-            m.Add(sum(y[c] for c in cs) == TP_PAR_TD * y[g.nom])
+            m.Add(sum(y[c] for c in cs) == tp_par_td * y[g.nom])
 
     for idx, bloc in enumerate(blocs):  # C5a : assez de places par bloc
         if nb[idx] == 0:
@@ -369,15 +370,18 @@ def _poser_indice(m, x, hint):
                 m.AddHint(x[e, nom], 1)
 
 
-def resoudre(s, groupes, k=None, compat=None, poids=None, hint=None):
+def resoudre(
+    s, groupes, k=None, compat=None, poids=None, hint=None, tp_par_td=TP_PAR_TD
+):
     """Résout l'affectation multi-type et renvoie (statut, aff, eff, ind).
 
-    s       : {étudiant: LV2}
-    groupes : séquence de `Groupe` (ou dict {nom: capacité})
-    k       : nombre total de groupes ouverts imposé (None = choisi)
-    compat  : {étudiant: [groupes autorisés]} (C3)
-    poids   : {"f1": w1, "f2": w2, "f3": w3}, 1/3 chacun par défaut
-    hint    : affectation greedy donnée comme point de départ
+    s         : {étudiant: LV2}
+    groupes   : séquence de `Groupe` (ou dict {nom: capacité})
+    k         : nombre total de groupes ouverts imposé (None = choisi)
+    compat    : {étudiant: [groupes autorisés]} (C3)
+    poids     : {"f1": w1, "f2": w2, "f3": w3}, f2 majoritaire par défaut
+    hint      : affectation greedy donnée comme point de départ
+    tp_par_td : TP ouverts par TD ouvert (C8, règle établissement)
     """
     poids = dict(POIDS_DEFAUT, **(poids or {}))
     groupes = _normaliser_groupes(groupes)
@@ -420,7 +424,9 @@ def resoudre(s, groupes, k=None, compat=None, poids=None, hint=None):
     }
     coefs = _coefficients(poids, bornes)
 
-    m, x, y, n, ec_par_bloc, q = bati(s, groupes, a, blocs, nb, k, poids)
+    m, x, y, n, ec_par_bloc, q = bati(
+        s, groupes, a, blocs, nb, k, poids, tp_par_td
+    )
     _poser_indice(m, x, hint)
 
     if any(coefs.values()):
