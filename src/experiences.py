@@ -64,7 +64,7 @@ def ligne_resultats(inst):
     r_g = evaluer(s, groupes, aff_g, compat=compat)
 
     t0 = time.perf_counter()
-    _, aff_c, _, ind_c = resoudre(s, groupes, compat=compat, hint=aff_g)
+    _, aff_c, _, ind_c = resoudre(s, groupes, compat=compat)
     tc = time.perf_counter() - t0
     r_c = evaluer(s, groupes, aff_c, compat=compat)
 
@@ -85,8 +85,8 @@ def ligne_resultats(inst):
         "f3n_c": round(r_c.normalises["f3"], 3),
         "score_g": round(r_g.score, 3),
         "score_c": round(r_c.score, 3),
-        "opt": "oui" if ind_c.get("optimal") else "non",
-        "ecart": ind_c.get("ecart"),
+        "opt": "oui" if ind_c.get("statut") == "OPTIMAL" else "non",
+        "ecart": ind_c.get("gap"),
         "t_g": round(tg, 4),
         "t_c": round(tc, 4),
     }
@@ -105,7 +105,6 @@ def sensibilite_poids(lot, nb=5):
                 groupes,
                 compat=compat,
                 poids={"f1": 1.0 - w2, "f2": w2, "f3": 0.0},
-                hint=aff_g,
             )
             if ind:
                 f1s.append(ind["f1_norm"])
@@ -159,7 +158,7 @@ def lignes_reelles():
         if appel == "greedy":
             aff, _ = greedy(s, groupes)
         elif appel == "cpsat":
-            _, aff, _, _ = resoudre(s, groupes, hint=greedy(s, groupes)[0])
+            _, aff, _, _ = resoudre(s, groupes)
         dt = time.perf_counter() - t0
         r = evaluer(s, groupes, aff)
         resultats.append(

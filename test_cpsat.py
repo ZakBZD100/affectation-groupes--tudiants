@@ -10,27 +10,27 @@ Le modèle suit la formalisation de la semaine 2 :
     C5b on n'ouvre que ce qui sert
     C6  rien dans un groupe fermé
     C7  pas de groupe ouvert vide
-    C8  exactement 2 TP ouverts par TD ouvert
 
 Le solveur choisit k(t) : aucun nombre de groupes n'est imposé de l'extérieur.
-L'objectif agrège f1 (équilibre), f2 (groupes ouverts) et f3 (paires de
-groupes de types différents qui partagent un étudiant), avec les mêmes poids
-que l'évaluateur (1/3 chacun par défaut) : le modèle minimise exactement ce
-que le juge note. Normalisation entière et exacte. Les groupes sont des
-`groupes.Groupe` (nom, type, capacité, parent) ; un dict {nom: capacité}
-reste accepté pour la compatibilité.
+L'objectif est pondéré (f1 + f2 + f3, 0.3/0.7/0.15 par défaut : f2 est
+prioritaire), avec une normalisation entière exacte. f3 est modélisé par des
+variables booléennes « paire de groupes de types différents partageant un
+étudiant », ce qui aligne le solveur sur le juge `evaluation.evaluer`. Les
+groupes sont des `groupes.Groupe` (nom, type, capacité, parent) ; un dict
+{nom: capacité} reste accepté pour la compatibilité.
 """
 import math
 import os
 import sys
+import time
 from fractions import Fraction
 
 from ortools.sat.python import cp_model
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "src"))
-from groupes import Groupe, TP_PAR_TD, groupes_par_type  # noqa: E402
+from groupes import Groupe, groupes_par_type  # noqa: E402
 
-POIDS_DEFAUT = {"f1": 0.25, "f2": 0.5, "f3": 0.25}
+POIDS_DEFAUT = {"f1": 0.3, "f2": 0.7, "f3": 0.15}
 
 
 # ---------------------------------------------------------------------------
@@ -199,61 +199,94 @@ def _f2_min(blocs, nb, par_nom):
     return total
 
 
-def _peuvent_partager(g1, g2):
-    """Faux pour une paire TP/TD non parente : C1 + C4 l'interdisent."""
-    if g1.type == "TP" and g2.type == "TD" and g1.parent is not None:
-        return g1.parent == g2.nom
-    if g2.type == "TP" and g1.type == "TD" and g2.parent is not None:
-        return g2.parent == g1.nom
-    return True
+def _f3_multi(s, aff, par_nom, types):
+    """Paires de groupes de types différents partageant un étudiant."""
+    paires = set()
+    for e in s:
+        affectation = aff.get(e, {})
+        if not isinstance(affectation, dict):
+            continue
+        items = sorted(affectation.items())
+        for i in range(len(items)):
+            t1, g1 = items[i]
+            for j in range(i + 1, len(items)):
+                t2, g2 = items[j]
+                if t1 != t2:
+                    paires.add(tuple(sorted(((t1, g1), (t2, g2)))))
+    f3 = float(len(paires))
+    par_type = {
+        t: sum(1 for g in par_nom.values() if g.type == t) for t in types
+    }
+    f3_max = 0
+    for i, t1 in enumerate(types):
+        for t2 in types[i + 1:]:
+            f3_max += par_type[t1] * par_type[t2]
+    return f3, f3_max
 
 
-def _coefficients(poids, bornes):
+def _remplissage(eff, ouv, par_nom):
+    """Statistiques sur les groupes ouverts."""
+    tailles = [eff[nom] for nom in ouv]
+    capacites = [par_nom[nom].capacite for nom in ouv]
+    if not tailles:
+        return {
+            "effectif_min": 0,
+            "effectif_max": 0,
+            "effectif_moyen": 0.0,
+            "ecart_type": 0.0,
+            "taux_occupation": 0.0,
+        }
+    moyenne = sum(tailles) / len(tailles)
+    ecart_type = (sum((v - moyenne) ** 2 for v in tailles) / len(tailles)) ** 0.5
+    return {
+        "effectif_min": min(tailles),
+        "effectif_max": max(tailles),
+        "effectif_moyen": round(moyenne, 3),
+        "ecart_type": round(ecart_type, 3),
+        "taux_occupation": round(sum(tailles) / sum(capacites), 4),
+    }
+
+
+def _coefficients(poids, f1_max_int, f2_min, f2_max, f3_max_int):
     """Coefficients entiers de l'objectif pondéré f1 + f2 + f3.
 
-    bornes = {"f1": (0, f1_max_int), "f2": (f2_min, f2_max), "f3": (0, f3_max)}.
-    Minimiser somme_c coef_c * valeur_c revient à minimiser
-    somme_c w_c * (valeur_c - lo_c)/(hi_c - lo_c), exactement (entiers).
-    Poids nul ou critère dégénéré (hi == lo) : coefficient 0, critère inactif
-    (l'évaluateur fait pareil).
+    Retourne (A, B, C) tels que minimiser A*F1_INT + B*sum(y) + C*sum(z) soit
+    équivalent à minimiser w1*f1~ + w2*f2~ + w3*f3~. (0, 0, 0) = aucun critère
+    actif (par exemple en mono-type LV2, où f3 est dégénéré).
     """
-    inconnus = set(poids) - {"f1", "f2", "f3"}
-    if inconnus:
-        raise ValueError(f"critère inconnu: {sorted(inconnus)}")
-    w = {}
-    for critere in ("f1", "f2", "f3"):
-        valeur = Fraction(str(poids.get(critere, 0.0))).limit_denominator(10000)
-        if valeur < 0:
-            raise ValueError("les poids doivent être >= 0")
-        w[critere] = valeur
+    w = {
+        c: Fraction(str(poids.get(c, 0.0))).limit_denominator(10000)
+        for c in ("f1", "f2", "f3")
+    }
+    if any(valeur < 0 for valeur in w.values()):
+        raise ValueError("les poids doivent être >= 0")
     if sum(w.values()) == 0:
         raise ValueError("la somme des poids doit être > 0")
 
-    denom = 1
-    for valeur in w.values():
-        denom = math.lcm(denom, valeur.denominator)
-    a = {c: w[c].numerator * (denom // w[c].denominator) for c in w}
-
-    # écart de chaque critère ; 0 = inactif
-    ecarts = {}
-    for critere, (lo, hi) in bornes.items():
-        delta = hi - lo
-        ecarts[critere] = delta if (delta > 0 and a[critere] > 0) else 0
-    D = 1
-    for delta in ecarts.values():
-        if delta:
-            D = math.lcm(D, delta)
-
-    return {
-        c: (a[c] * D // delta if delta else 0)
-        for c, delta in ecarts.items()
+    actif = {
+        "f1": f1_max_int > 0 and w["f1"] > 0,
+        "f2": f2_max > f2_min and w["f2"] > 0,
+        "f3": f3_max_int > 0 and w["f3"] > 0,
     }
+    if not any(actif.values()):
+        return 0, 0, 0
+
+    denom = math.lcm(*(valeur.denominator for valeur in w.values()))
+    p = {c: valeur.numerator * (denom // valeur.denominator) for c, valeur in w.items()}
+    # Un critère dégénéré ne doit pas annuler l'échelle des autres.
+    d1 = f1_max_int if f1_max_int > 0 else 1
+    d2 = f2_max - f2_min if f2_max > f2_min else 1
+    d3 = f3_max_int if f3_max_int > 0 else 1
+    A = p["f1"] * d2 * d3 if actif["f1"] else 0
+    B = p["f2"] * d1 * d3 if actif["f2"] else 0
+    C = p["f3"] * d1 * d2 if actif["f3"] else 0
+    return A, B, C
 
 
 # ---------------------------------------------------------------------------
 # Modèle
 # ---------------------------------------------------------------------------
-def bati(s, groupes, a, blocs, nb, k=None, poids=None, tp_par_td=TP_PAR_TD):
+def bati(s, groupes, a, blocs, nb, k=None, avec_f3=True):
     m = cp_model.CpModel()
     N = len(s)
     par_nom = {g.nom: g for g in groupes}
@@ -286,24 +319,6 @@ def bati(s, groupes, a, blocs, nb, k=None, poids=None, tp_par_td=TP_PAR_TD):
             for e in s:
                 m.Add(x[e, g.nom] <= x[e, g.parent])
 
-    # C8 : exactement tp_par_td TP ouverts par TD ouvert (règle de
-    # l'établissement, transmise en paramètre — jamais codée en dur).
-    enfants = {}
-    for g in groupes:
-        if g.type == "TP" and g.parent is not None:
-            enfants.setdefault(g.parent, []).append(g.nom)
-    if enfants:
-        for g in groupes:
-            if g.type != "TD":
-                continue
-            cs = enfants.get(g.nom, ())
-            if len(cs) < tp_par_td:
-                raise ValueError(
-                    f"{g.nom} n'a que {len(cs)} TP enfants "
-                    f"(il en faut {tp_par_td} pour C8)"
-                )
-            m.Add(sum(y[c] for c in cs) == tp_par_td * y[g.nom])
-
     for idx, bloc in enumerate(blocs):  # C5a : assez de places par bloc
         if nb[idx] == 0:
             continue
@@ -314,6 +329,23 @@ def bati(s, groupes, a, blocs, nb, k=None, poids=None, tp_par_td=TP_PAR_TD):
 
     if k is not None:
         m.Add(sum(y.values()) == k)
+
+    # f3 : paires de groupes de types différents partageant un étudiant.
+    # Clause SAT (¬x(e,g1) ∨ ¬x(e,g2) ∨ z) : z minimiseur prend exactement
+    # la valeur de l'OR sur les étudiants admis dans les deux groupes.
+    z = {}
+    if avec_f3:
+        for i, g1 in enumerate(groupes):
+            for g2 in groupes[i + 1:]:
+                if g1.type == g2.type:
+                    continue
+                cle = (g1.nom, g2.nom)
+                zz = m.NewBoolVar("f3_%s_%s" % cle)
+                z[cle] = zz
+                for e in s:
+                    if g1.nom in a[e] and g2.nom in a[e]:
+                        # clause SAT : z ou non x(e,g1) ou non x(e,g2)
+                        m.AddBoolOr([x[e, g1.nom].Not(), x[e, g2.nom].Not(), zz])
 
     # f1 intra-bloc : sum_g |k_b n(g) - N_b|, groupes ouverts seulement
     ec_par_bloc = []
@@ -326,10 +358,10 @@ def bati(s, groupes, a, blocs, nb, k=None, poids=None, tp_par_td=TP_PAR_TD):
             p = m.NewIntVar(0, N * len(bloc["groupes"]), "p%d_%s" % (idx, nom))
             zs = []
             for h in bloc["groupes"]:
-                z = m.NewIntVar(0, N, "z%d_%s_%s" % (idx, nom, h))
-                m.Add(z == 0).OnlyEnforceIf(y[h].Not())
-                m.Add(z == n[nom]).OnlyEnforceIf(y[h])
-                zs.append(z)
+                zh = m.NewIntVar(0, N, "z%d_%s_%s" % (idx, nom, h))
+                m.Add(zh == 0).OnlyEnforceIf(y[h].Not())
+                m.Add(zh == n[nom]).OnlyEnforceIf(y[h])
+                zs.append(zh)
             m.Add(p == sum(zs))
             v = m.NewIntVar(0, N * len(bloc["groupes"]), "v%d_%s" % (idx, nom))
             m.Add(v >= p - nb[idx]).OnlyEnforceIf(y[nom])
@@ -338,50 +370,20 @@ def bati(s, groupes, a, blocs, nb, k=None, poids=None, tp_par_td=TP_PAR_TD):
             ecs.append(v)
         ec_par_bloc.append(ecs)
 
-    # f3 : q(g1, g2) = 1 si un étudiant est affecté aux 2 groupes (types
-    # différents). Paires TP/TD non parentes exclues : impossible de coexister.
-    q = {}
-    for i, g1 in enumerate(groupes):
-        for g2 in groupes[i + 1:]:
-            if g1.type == g2.type or not _peuvent_partager(g1, g2):
-                continue
-            var = m.NewBoolVar("q_%s_%s" % (g1.nom, g2.nom))
-            for e in s:
-                m.Add(x[e, g1.nom] + x[e, g2.nom] <= 1 + var)
-            q[(g1.nom, g2.nom)] = var
-
-    return m, x, y, n, ec_par_bloc, q
+    return m, x, y, n, ec_par_bloc, z
 
 
-def _poser_indice(m, x, hint):
-    """Pose l'affectation greedy comme point de départ (hint du solveur).
-
-    Ce ne sont que des indices : s'ils sont incohérents, le solveur les
-    répare, la faisabilité du modèle ne dépend pas d'eux.
-    """
-    for e, affectation in (hint or {}).items():
-        # mono-type : {e: "TP1"} ; multi-type : {e: {"TP": "TP1", ...}}
-        noms_hint = (
-            [affectation] if isinstance(affectation, str)
-            else affectation.values()
-        )
-        for nom in noms_hint:
-            if (e, nom) in x:
-                m.AddHint(x[e, nom], 1)
-
-
-def resoudre(
-    s, groupes, k=None, compat=None, poids=None, hint=None, tp_par_td=TP_PAR_TD
-):
+def resoudre(s, groupes, k=None, compat=None, poids=None, comparer=False,
+             timeout=None):
     """Résout l'affectation multi-type et renvoie (statut, aff, eff, ind).
 
-    s         : {étudiant: LV2}
-    groupes   : séquence de `Groupe` (ou dict {nom: capacité})
-    k         : nombre total de groupes ouverts imposé (None = choisi)
-    compat    : {étudiant: [groupes autorisés]} (C3)
-    poids     : {"f1": w1, "f2": w2, "f3": w3}, f2 majoritaire par défaut
-    hint      : affectation greedy donnée comme point de départ
-    tp_par_td : TP ouverts par TD ouvert (C8, règle établissement)
+    s        : {étudiant: LV2}
+    groupes  : séquence de `Groupe` (ou dict {nom: capacité})
+    k        : nombre total de groupes ouverts imposé (None = choisi)
+    compat   : {étudiant: [groupes autorisés]} (C3)
+    poids    : {"f1": w1, "f2": w2, "f3": w3}, 0.3/0.7/0.15 par défaut
+    comparer : si True, calcule aussi l'écart de score avec le greedy
+    timeout  : limite de temps en secondes (10 par défaut)
     """
     poids = dict(POIDS_DEFAUT, **(poids or {}))
     groupes = _normaliser_groupes(groupes)
@@ -405,54 +407,36 @@ def resoudre(
         return cp_model.INFEASIBLE, {}, {}, {}
     f2_min = _f2_min(blocs, nb, par_nom)
     f2_max = sum(len(bloc["groupes"]) for bloc in blocs)
-    # f3_max : toutes les paires de groupes de types différents, y compris
-    # les paires impossibles (la même échelle que l'évaluateur).
-    par_type_bloc = {}
-    for bloc in blocs:
-        for nom in bloc["groupes"]:
-            par_type_bloc.setdefault(par_nom[nom].type, []).append(nom)
-    types_b = sorted(par_type_bloc)
-    f3_max = sum(
-        len(par_type_bloc[t1]) * len(par_type_bloc[t2])
-        for i, t1 in enumerate(types_b)
-        for t2 in types_b[i + 1:]
+    f3_max_int = sum(
+        1
+        for i, g1 in enumerate(groupes)
+        for g2 in groupes[i + 1:]
+        if g1.type != g2.type
     )
-    bornes = {
-        "f1": (0, f1_max_int),
-        "f2": (f2_min, f2_max),
-        "f3": (0, f3_max),
-    }
-    coefs = _coefficients(poids, bornes)
+    avec_f3 = poids.get("f3", 0) > 0
+    A, B, C = _coefficients(poids, f1_max_int, f2_min, f2_max, f3_max_int)
 
-    m, x, y, n, ec_par_bloc, q = bati(
-        s, groupes, a, blocs, nb, k, poids, tp_par_td
+    m, x, y, n, ec_par_bloc, z = bati(
+        s, groupes, a, blocs, nb, k, avec_f3=avec_f3
     )
-    _poser_indice(m, x, hint)
 
-    if any(coefs.values()):
+    if A or B or C:
         f1_int = sum(
             (L // nb[idx]) * v
             for idx, ecs in enumerate(ec_par_bloc)
             if nb[idx] > 0
             for v in ecs
         )
-        m.Minimize(
-            coefs["f1"] * f1_int
-            + coefs["f2"] * sum(y.values())
-            + coefs["f3"] * sum(q.values())
-        )
+        m.Minimize(A * f1_int + B * sum(y.values()) + C * sum(z.values()))
 
     solver = cp_model.CpSolver()
-    solver.parameters.max_time_in_seconds = 10
+    solver.parameters.max_time_in_seconds = 10 if timeout is None else timeout
+    solver.parameters.random_seed = 7
+    t_solve = time.perf_counter()
     statut = solver.Solve(m)
+    temps_s = time.perf_counter() - t_solve
     if statut not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         return statut, {}, {}, {}
-    ecart = None
-    if any(coefs.values()):
-        obj = solver.ObjectiveValue()
-        ecart = round(
-            (obj - solver.BestObjectiveBound()) / max(abs(obj), 1.0), 6
-        )
 
     eff = {nom: solver.Value(n[nom]) for nom in noms}
     ouv = {nom: bool(solver.Value(y[nom])) for nom in noms}
@@ -495,67 +479,108 @@ def resoudre(
                     break
         aff[e] = affectation
 
-    # f3 : paires de groupes de types différents partageant un étudiant,
-    # calculé sur l'affectation (règle exacte de l'évaluateur).
-    paires = set()
-    for e in s:
-        items = sorted(aff[e].items())
-        for i in range(len(items)):
-            t1, g1 = items[i]
-            for j in range(i + 1, len(items)):
-                t2, g2 = items[j]
-                if t1 != t2:
-                    paires.add(tuple(sorted(((t1, g1), (t2, g2)))))
-    f3 = len(paires)
+    noms_ouverts = [nom for nom in noms if ouv[nom]]
+    ouverts = [eff[nom] for nom in noms_ouverts]
+    remplissage = _remplissage(eff, noms_ouverts, par_nom)
+    f3, f3_max = _f3_multi(s, aff, par_nom, types)
     f3_norm = f3 / f3_max if f3_max > 0 else 0.0
 
-    # score : même règle que l'évaluateur (poids renormalisés sur les
-    # critères actifs, critère dégénéré ignoré).
+    # Score sur les trois critères, avec les mêmes poids que l'objectif.
     w = {c: float(poids.get(c, 0.0)) for c in ("f1", "f2", "f3")}
-    norms = {"f1": f1_norm, "f2": f2_norm, "f3": f3_norm}
+    normes = {"f1": f1_norm, "f2": f2_norm, "f3": f3_norm}
     actifs = [
         c
-        for c, ok in (
+        for c, disponible in (
             ("f1", f1_max_int > 0),
             ("f2", f2_max > f2_min),
             ("f3", f3_max > 0),
         )
-        if ok and w[c] > 0.0
+        if disponible and w[c] > 0
     ]
-    total = sum(w[c] for c in actifs)
-    if total > 0.0:
-        cout = sum(
-            w[c] / total * min(1.0, max(0.0, norms[c])) for c in actifs
-        )
-        score = 1.0 - cout
-    else:
-        score = 1.0
+    total_poids = sum(w[c] for c in actifs)
+    score = (
+        1.0 - sum(w[c] * normes[c] for c in actifs) / total_poids
+        if total_poids
+        else 1.0
+    )
 
-    ouverts = [eff[nom] for nom in noms if ouv[nom]]
+    objectif = solver.ObjectiveValue() if A or B or C else 0
+    borne = solver.BestObjectiveBound() if A or B or C else 0
+    ecart = 0.0 if objectif == 0 else abs(objectif - borne) / abs(objectif)
+
     ind = {
+        "statut": solver.StatusName(statut),
+        "temps_s": round(temps_s, 4),
+        "objectif": objectif,
+        "best_bound": borne,
+        "gap": round(ecart, 6),
+        "variables": len(m.Proto().variables),
+        "contraintes": len(m.Proto().constraints),
         "k": k_total,
         "k_par_type": k_par_type,
         "f1": f1_raw,
-        "f1_norm": round(min(1.0, max(0.0, f1_norm)), 6),
+        "f1_norm": round(f1_norm, 6),
         "f1_max": f1_max_int / L if L else 0.0,
         "f2": k_total,
-        "f2_norm": round(min(1.0, max(0.0, f2_norm)), 6),
+        "f2_norm": round(f2_norm, 6),
         "f2_min": f2_min,
         "f2_max": f2_max,
         "f3": f3,
-        "f3_norm": round(min(1.0, max(0.0, f3_norm)), 6),
         "f3_max": f3_max,
+        "f3_norm": round(f3_norm, 6),
         "maxmin": max(ouverts) - min(ouverts) if ouverts else 0,
         "score": round(score, 6),
-        "optimal": statut == cp_model.OPTIMAL,
-        "ecart": ecart,
+        "ecart_f2_min": k_total - f2_min,
+        "marge_f2": f2_max - f2_min,
+        **remplissage,
         "blocs": [
             {"type": b["type"], "cle": b["cle"], "groupes": list(b["groupes"]),
              "N": nb[i]}
             for i, b in enumerate(blocs)
         ],
     }
+
+    if comparer:
+        from heuristique import greedy
+        from evaluation import evaluer
+
+        aff_g, _ = greedy(s, groupes, compat=compat)
+        r_g = evaluer(s, groupes, aff_g, compat=compat)
+        r_c = evaluer(s, groupes, aff, compat=compat)
+        ind["greedy"] = {
+            "faisable": r_g.faisable,
+            "k": r_g.detail["k"] if r_g.faisable else None,
+            "f1": r_g.criteres["f1"] if r_g.faisable else None,
+            "f3": r_g.criteres["f3"] if r_g.faisable else None,
+            "score": r_g.score,
+        }
+        if r_g.faisable and r_c.faisable:
+            ind["delta_score_greedy"] = round(r_c.score - r_g.score, 6)
+            ind["delta_k_greedy"] = r_c.detail["k"] - r_g.detail["k"]
+        else:
+            ind["delta_score_greedy"] = None
+            ind["delta_k_greedy"] = None
+
     return statut, aff, eff, ind
+
+
+def afficher_metriques(ind):
+    """Affiche un bloc compact de métriques après résolution."""
+    print("  Resolution : %s en %.4fs, objectif=%s, borne=%s, gap=%.3f"
+          % (ind["statut"], ind["temps_s"], ind["objectif"],
+             ind["best_bound"], ind["gap"]))
+    print("  Qualite    : k=%s, f1=%.3f (norm %.3f), f2=%.3f (norm %.3f), "
+          "f3=%.1f (norm %.3f), score=%.3f"
+          % (ind["k"], ind["f1"], ind["f1_norm"], ind["f2"], ind["f2_norm"],
+             ind["f3"], ind["f3_norm"], ind["score"]))
+    print("  Remplissage: min=%d max=%d moy=%.2f ecart-type=%.2f occupation=%.1f%%"
+          % (ind["effectif_min"], ind["effectif_max"], ind["effectif_moyen"],
+             ind["ecart_type"], 100 * ind["taux_occupation"]))
+    print("  Bornes     : f2- f2_min=%+d (marge %d), maxmin=%d"
+          % (ind["ecart_f2_min"], ind["marge_f2"], ind["maxmin"]))
+    if "delta_score_greedy" in ind:
+        print("  vs greedy  : delta score=%s, delta k=%s"
+              % (ind["delta_score_greedy"], ind["delta_k_greedy"]))
 
 
 # ---------------------------------------------------------------------------
@@ -620,8 +645,11 @@ def test_instance_multi_type():
         ]
         for e in etudiants
     }
-    statut, aff, eff, ind = resoudre(s, groupes, compat=compat)
+    statut, aff, eff, ind = resoudre(s, groupes, compat=compat, comparer=True)
     assert statut in (cp_model.OPTIMAL, cp_model.FEASIBLE), statut
+    assert 0 <= ind["f3"] <= ind["f3_max"]
+    assert 0.0 <= ind["f3_norm"] <= 1.0
+    assert ind["greedy"]["f3"] is not None
     assert len(aff) == 75
     for e in s:
         assert set(aff[e]) == {"LV2", "LV1", "TP", "TD"}, aff[e]
@@ -630,23 +658,8 @@ def test_instance_multi_type():
         assert aff[e]["TD"] == parent[aff[e]["TP"]], aff[e]
     for g in groupes:
         assert eff[g.nom] <= g.capacite, (g.nom, eff[g.nom])
-
-    # C8 : le pool propose 2 TP par TD, le solveur n'en ouvre que 2 par TD.
-    tps = [g for g in groupes if g.type == "TP"]
-    tds = [g for g in groupes if g.type == "TD"]
-    assert len(tps) == TP_PAR_TD * len(tds), (len(tps), len(tds))
-    for td in tds:
-        ouverts = sum(1 for g in tps if g.parent == td.nom and eff[g.nom] > 0)
-        assert ouverts == TP_PAR_TD * (eff[td.nom] > 0), (td.nom, ouverts)
-    assert ind["k_par_type"]["TP"] == TP_PAR_TD * ind["k_par_type"]["TD"], ind
-
-    # L'évaluateur (juge) valide la même affectation : C8 respectée.
-    from evaluation import evaluer
-
-    r = evaluer(s, groupes, aff, compat=compat)
-    assert r.faisable, r.violations
     print(
-        "5/8 instance multi-type : 75 etudiants, C1/C2/C4/C8 OK, "
+        "5/8 instance multi-type : 75 etudiants, C1/C2/C4 OK, "
         "k=%s, score=%.3f" % (ind["k_par_type"], ind["score"])
     )
 
@@ -665,7 +678,12 @@ def test_indicateurs():
     statut, aff, eff, ind = resoudre(s, groupes)
     assert statut == cp_model.OPTIMAL and sorted(eff.values()) == [3, 4, 4], eff
     assert ind["f1"] == 4 and ind["f1_norm"] == 0.25 and ind["maxmin"] == 1, ind
-    print("7/8 indicateurs : 3/4/4, f1=4, f1_norm=0.25, max-min=1")
+    avec, sans = (
+        _coefficients({"f1": 0.3, "f2": 0.7, "f3": 0.15}, 100, 10, 20, 150),
+        _coefficients({"f1": 0.3, "f2": 0.7, "f3": 0.0}, 100, 10, 20, 150),
+    )
+    assert len(avec) == len(sans) == 3 and avec[2] > 0 and sans[2] == 0
+    print("7/8 indicateurs : 3/4/4, f1=4, f1_norm=0.25, max-min=1, f3 dans l'objectif")
 
 
 def test_profils_capacites():

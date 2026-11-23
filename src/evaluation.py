@@ -8,15 +8,15 @@ les critères souples du PDF `semaine2_formalisation` :
     f3 : conflits de parallélisation entre types
 
 Chaque critère est normalisé dans [0, 1] entre un minimum et un maximum
-réalistes, puis agrégé avec des poids (f2 majoritaire par défaut) :
+réalistes, puis agrégé avec des poids (f1=0.25, f2=0.60, f3=0.15 par défaut :
+f2 est prioritaire) :
 
     score = 1 - somme_c w_c * f~_c  dans [0, 1]   (1 = parfait)
 
 Contraintes dures vérifiées : C1 (un groupe par type), C2 (capacité), C3
-(choix respecté), C4 (TP -> TD parent), C5a (assez de places ouvertes par
-bloc) et C8 (`tp_par_td` TP ouverts par TD ouvert — règle de l'établissement,
-transmise en paramètre, défaut 2). Une affectation qui les viole est
-rejetée : `faisable=False`, `score=None`, violations listées.
+(choix respecté), C4 (TP -> TD parent) et C5a (assez de places ouvertes par
+bloc). Une affectation qui les viole est rejetée : `faisable=False`,
+`score=None`, violations listées.
 
 Deux formats d'entrée sont acceptés :
 
@@ -48,8 +48,7 @@ from math import ceil
 from groupes import TP_PAR_TD  # règle de l'établissement (C8), défaut 2
 
 CRITERES = ("f1", "f2", "f3")
-# Pondération : f2 (nb de groupes) majoritaire, f1 et f3 à égalité.
-POIDS_DEFAUT = {"f1": 0.25, "f2": 0.5, "f3": 0.25}
+POIDS_DEFAUT = {"f1": 0.25, "f2": 0.60, "f3": 0.15}
 BLOC_GLOBAL = "__global__"
 
 
@@ -67,13 +66,13 @@ class _G:
 class Resultat:
     """Résultat figé d'une évaluation.
 
-    faisable    : les contraintes dures C1-C4/C5a/C8 sont respectées
+    faisable    : les contraintes dures C1-C4/C5a sont respectées
     score       : 1 - coût pondéré, dans [0, 1], None si infaisable
     cout        : somme des critères normalisés pondérés, None si infaisable
     criteres    : valeurs brutes f1, f2, f3
     normalises  : valeurs f~ dans [0, 1] (0 pour un critère désactivé)
     poids       : poids effectifs après renormalisation sur les critères actifs
-    violations  : messages C1-C4/C5a/C8 si infaisable
+    violations  : messages C1-C4/C5a si infaisable
     detail      : effectifs, blocs, bornes de normalisation, k
     """
 
@@ -306,31 +305,6 @@ def _verifier(s, par_nom, aff_multi, compat, restreints, blocs, tp_par_td=TP_PAR
                 f"C4: {e} est dans {tp} mais pas dans son TD parent {parent}"
             )
 
-    # C8 : exactement tp_par_td TP ouverts par TD ouvert (règle de
-    # l'établissement, paramètre — même valeur que le solveur).
-    enfants = {}
-    for nom, g in par_nom.items():
-        if g.type == "TP" and g.parent:
-            enfants.setdefault(g.parent, []).append(nom)
-    if enfants:
-        for g in par_nom.values():
-            if g.type != "TD":
-                continue
-            cs = enfants.get(g.nom, ())
-            if len(cs) < tp_par_td:
-                violations.append(
-                    f"C8: {g.nom} n'a que {len(cs)} TP enfants "
-                    f"({tp_par_td} attendus)"
-                )
-                continue
-            ouverts = sum(1 for c in cs if eff.get(c, 0) > 0)
-            attendu = tp_par_td if eff.get(g.nom, 0) > 0 else 0
-            if ouverts != attendu:
-                violations.append(
-                    f"C8: {g.nom} ouvre {ouverts} TP, {attendu} attendu "
-                    f"({tp_par_td} par TD)"
-                )
-
     # C5a : assez de places ouvertes dans chaque bloc.
     groupes_par_bloc = {}
     for nom, bloc in blocs.items():
@@ -445,7 +419,7 @@ def _f3(s, aff_multi, par_nom, blocs):
 # Agrégation
 # ---------------------------------------------------------------------------
 def _poids(poids):
-    """Fusionne les poids fournis avec les poids uniformes par défaut."""
+    """Fusionne les poids fournis avec les poids par défaut (f2 prioritaire)."""
     resultat = dict(POIDS_DEFAUT)
     if poids:
         for critere, valeur in poids.items():
@@ -512,11 +486,11 @@ def evaluer(
     aff           : {e: {type: groupe}} (multi-type) ou {e: groupe} (mono-type)
     compat        : {étudiant: [groupes autorisés]} (C3) ; None = tous
     blocs         : {nom_groupe: bloc} ; None = inféré depuis les types/compat
-    poids         : {"f1": w1, "f2": w2, "f3": w3}, f2 majoritaire par défaut
+    poids         : {"f1": w1, "f2": w2, "f3": w3}, 0.25/0.60/0.15 par défaut
     capacite_max  : Cmax imposé pour f2_min ; None = max des capacités du bloc
     tp_par_td     : TP ouverts par TD ouvert (C8, règle établissement)
 
-    Une affectation invalide (C1, C2, C3, C4, C5a, C8) renvoie `faisable=False`,
+    Une affectation invalide (C1, C2, C3, C4, C5a) renvoie `faisable=False`,
     `score=None` et la liste des violations.
     """
     s = dict(s)

@@ -7,11 +7,10 @@ capacités **explicite** : il n'existe plus de capacité par défaut cachée.
 Pour tester le solveur sur des cas variés, `PROFILS_CAPACITES` fournit quatre
 profils nommés et `variantes_capacites` en génère des perturbations entières.
 
-Structure hiérarchique : un TP a exactement un TD parent, et un TD ouvert
-porte exactement `tp_par_td` TP ouverts (contrainte C8, valeur de règle de
-l'établissement transmise en paramètre — défaut `TP_PAR_TD = 2`).
-Le pool propose `tp_par_td` enfants par TD : c'est le modèle qui décide quels
-TD ouvrir, jamais le générateur.
+Structure hiérarchique : un TD peut avoir plusieurs TP enfants, et un TP a
+exactement un TD parent. Aucun ratio 2:1 n'est imposé : le nombre de TP
+ouverts par TD est une décision du solveur. Le parent est une donnée du pool
+(round-robin), pas une contrainte de ratio.
 
 Il ne dépend pas de `generateur_instances` : il accepte soit une séquence
 d'étudiants, soit un objet exposant un attribut `.etudiants` (une Instance).
@@ -23,11 +22,6 @@ from dataclasses import dataclass
 from math import ceil
 
 TYPES = ("LV2", "LV1", "TP", "TD")
-
-# Règle de l'établissement (C8) : un TD ouvert porte exactement 2 TP ouverts.
-# Valeur par défaut, transmise partout en paramètre `tp_par_td` — ce n'est
-# pas une constante codée en dur dans le modèle.
-TP_PAR_TD = 2
 
 # Profils de capacités maximales C(g), en places par groupe.
 # Aucun n'est appliqué implicitement : l'appelant doit en choisir un.
@@ -119,10 +113,9 @@ def construire_groupes(
     solveur la liberté d'en ouvrir un de plus que le minimum. `capacites` doit
     contenir une capacité pour chaque type demandé.
 
-    TP/TD : les TD sont créés en premier, en nombre suffisant pour que
-    `tp_par_td` TP par TD tiennent l'effectif (au plus min(C_TD,
-    tp_par_td*C_TP) étudiants par TD), puis chaque TD reçoit exactement
-    `tp_par_td` enfants. Le solveur choisit ensuite quels TD ouvrir (C8).
+    TP/TD : les TD sont créés avant les TP ; chaque TP reçoit un TD parent en
+    round-robin. Il n'y a aucun ratio fixe : le solveur ouvre le nombre de TP
+    qu'il veut, et un TD peut donc porter 1, 2, 3... TP ouverts.
     """
     if marge < 0:
         raise ValueError("marge doit être >= 0")
@@ -150,20 +143,14 @@ def construire_groupes(
 
     noms_td = []
     if "TD" in types:
-        # Un TD porte tp_par_td TP : il ne peut héberger que
-        # min(C_TD, tp_par_td * C_TP) étudiants (C2 et C8).
-        par_td = cap["TD"]
-        if "TP" in types:
-            par_td = min(cap["TD"], tp_par_td * cap["TP"])
-        for i in range(1, ceil(n / par_td) + marge + 1):
+        for i in range(1, ceil(n / cap["TD"]) + marge + 1):
             nom = f"TD{i}"
             noms_td.append(nom)
             groupes.append(Groupe(nom, "TD", cap["TD"]))
 
     if "TP" in types:
-        # tp_par_td TP consécutifs par TD : chaque TD du pool a ses enfants.
-        for i in range(1, tp_par_td * len(noms_td) + 1):
-            parent = noms_td[(i - 1) // tp_par_td]
+        for i in range(1, ceil(n / cap["TP"]) + marge + 1):
+            parent = noms_td[(i - 1) % len(noms_td)]
             groupes.append(Groupe(f"TP{i}", "TP", cap["TP"], parent))
 
     return tuple(groupes)

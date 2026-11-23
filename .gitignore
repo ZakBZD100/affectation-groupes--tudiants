@@ -1,11 +1,16 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+build/
+dist/
+*.spec
+*.egg-info/
+.venv/
 
-# confidentiel : jamais poussé
+# confidentiel : jamais pousse
 donnees/
 
-# sources LaTeX locales : seuls les PDF sont poussés
+# sources LaTeX locales : seuls les PDF sont pousses
 docs/*.tex
 docs/*.html
 docs/*.txt

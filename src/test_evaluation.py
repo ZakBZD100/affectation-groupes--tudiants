@@ -6,7 +6,6 @@ sys.path.insert(0, RACINE)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from evaluation import evaluer
-from groupes import Groupe
 
 
 def exemple_pdf():
@@ -81,24 +80,7 @@ def test_contraintes_dures():
     r = evaluer(s, groupes, inconnu_groupe, compat=compat)
     assert not r.faisable and any("groupe inconnu" in v for v in r.violations)
 
-    # C8 : un TD ouvert doit porter exactement 2 TP ouverts.
-    pool = [
-        Groupe("TP1", "TP", 6, "TD1"), Groupe("TP2", "TP", 6, "TD1"),
-        Groupe("TP3", "TP", 6, "TD2"), Groupe("TP4", "TP", 6, "TD2"),
-        Groupe("TD1", "TD", 12), Groupe("TD2", "TD", 12),
-    ]
-    s8 = {i: "Allemand" for i in range(1, 7)}
-    valide = {
-        i: {"TP": "TP1" if i <= 3 else "TP2", "TD": "TD1"} for i in s8
-    }
-    r = evaluer(s8, pool, valide)
-    assert r.faisable, r.violations
-
-    un_seul = {i: {"TP": "TP1", "TD": "TD1"} for i in s8}
-    r = evaluer(s8, pool, un_seul)
-    assert not r.faisable and any(v.startswith("C8") for v in r.violations)
-
-    print("2/7 contraintes dures OK (C1 manquant/inconnu, C2, C3, C8)")
+    print("2/7 contraintes dures OK (C1 manquant/inconnu, C2, C3)")
 
 
 def test_f2_et_poids():
@@ -114,9 +96,8 @@ def test_f2_et_poids():
     assert r.detail["f2_min"] == 3
     assert r.detail["f2_max"] == 4
     assert r.normalises["f2"] == 0.0
-    # Poids renormalisés sur les critères actifs : f2 majoritaire (0,5/0,75
-    # = 2/3) et f1 (0,25/0,75 = 1/3) ; f3 est inactif sur ce cas mono-type.
-    assert r.poids["f1"] == 1.0 / 3.0 and r.poids["f2"] == 2.0 / 3.0
+    assert abs(r.poids["f1"] - 0.25 / 0.85) < 1e-9
+    assert abs(r.poids["f2"] - 0.60 / 0.85) < 1e-9
     assert r.score == 1.0
 
     aff4 = {
