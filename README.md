@@ -16,9 +16,10 @@ lui-même le nombre de groupes ouverts `k(t)`.
 pip install ortools
 ```
 
-L'export ne demande aucune dépendance : ce sont des CSV UTF-8 avec BOM,
-lisibles directement par Excel. `pandas`, `openpyxl` et `xlsxwriter` ne sont
-pas nécessaires.
+L'export résout les instances puis écrit des CSV UTF-8 avec BOM, lisibles
+directement par Excel. Il utilise donc `ortools`, mais ni `pandas`, ni
+`openpyxl`, ni `xlsxwriter` ne sont nécessaires. L'option `--sans-solution`
+permet d'exporter les seules données d'entrée sans lancer le solveur.
 
 ## Commandes et résultats attendus
 
@@ -29,8 +30,9 @@ python test_cpsat.py
 ```
 
 Modèle multi-type : C1 par type, C2, C3, C4 (TP → TD parent), C5a/C5b,
-C6/C7, objectif pondéré f1 + f2. Un test dédié rejoue le solveur sur les
-quatre profils de capacités et deux variantes aléatoires. Résultat attendu :
+C6/C7, objectif pondéré f1 + f2 (**30/70**, f2 prioritaire). Un test dédié
+rejoue le solveur sur les quatre profils de capacités et deux variantes
+aléatoires. Résultat attendu :
 
 ```
 8/8 tests passent
@@ -51,8 +53,8 @@ immuabilité, historique et instances extrêmes. Résultat attendu :
 python src/test_evaluation.py
 ```
 
-Évaluation post-hoc (C1 à C4/C5a, f1/f2/f3, normalisation, poids). Résultat
-attendu :
+Évaluation post-hoc (C1 à C4/C5a, f1/f2/f3, normalisation, poids
+**0.25/0.60/0.15**, f2 prioritaire). Résultat attendu :
 
 ```
 7/7 tests de l'évaluation passent
@@ -76,12 +78,17 @@ python src/export_csv.py
 ```
 
 Fige un lot reproductible de 20 instances (`seed=7`) plus les 7 instances
-extrêmes dans l'historique global, puis écrit :
+extrêmes dans l'historique global, résout chacune avec le profil `standard`
+(en comparant au greedy), puis écrit trois tables :
 
-- `exports/instances.csv` — une ligne par instance (effectif, répartition
-  LV2, choix tardifs, cas particuliers, catégorie) ;
-- `exports/etudiants.csv` — une ligne par étudiant, toutes instances
-  confondues.
+- `exports/instances.csv` — une ligne par instance : données d'entrée
+  (effectif, répartition LV2, choix tardifs, cas particuliers, catégorie) +
+  métriques de résolution, de qualité, de remplissage et de comparaison ;
+- `exports/etudiants.csv` — une ligne par étudiant : entrées + **groupes
+  assignés** (`groupe_lv2`, `groupe_lv1`, `groupe_tp`, `groupe_td`) ;
+- `exports/resultats_etudiants.csv` — **état après analyse**, une ligne par
+  étudiant : choix LV2, quatre groupes, `td_parent`, `respecte_choix`,
+  `statut_affectation`, `faisable`, scores et méthode.
 
 Résultat attendu :
 
@@ -89,6 +96,7 @@ Résultat attendu :
 27 instance(s) figée(s), 1845 étudiant(s)
   -> .../exports/instances.csv
   -> .../exports/etudiants.csv
+  -> .../exports/resultats_etudiants.csv
 ```
 
 Options :
@@ -96,8 +104,30 @@ Options :
 ```bash
 python src/export_csv.py --lot 30 --seed 11
 python src/export_csv.py --sans-extremes
+python src/export_csv.py --sans-solution   # entrées seules, sans solveur
 python src/export_csv.py --sortie C:\chemin\vers\sortie
 ```
+
+Les 80 étudiants « cas particuliers » (cesure, redoublant) ne sont pas
+affectés : ils apparaissent dans les trois fichiers avec
+`statut_affectation = non_affecte_cas_particulier` et des groupes vides.
+
+### Métriques affichées après le solveur
+
+`resoudre(..., comparer=True)` enrichit le dictionnaire d'indicateurs `ind`,
+et `afficher_metriques(ind)` les affiche en quatre blocs :
+
+| Bloc | Indicateurs |
+|---|---|
+| Résolution | `statut`, `temps_s`, `objectif`, `best_bound`, `gap`, `variables`, `contraintes` |
+| Qualité | `f1`, `f1_norm`, `f1_max`, `f2`, `f2_norm`, `f2_min`, `f2_max`, `f3`, `f3_max`, `f3_norm`, `k`, `k_par_type`, `score` |
+| Remplissage | `effectif_min`, `effectif_max`, `effectif_moyen`, `ecart_type`, `taux_occupation`, `maxmin` |
+| Comparaison | `ecart_f2_min`, `marge_f2`, `greedy`, `delta_score_greedy`, `delta_k_greedy` |
+
+Le `gap` est calculé à partir de `ObjectiveValue()` et `BestObjectiveBound()`
+(les méthodes `Gap()`, `NumVariables()` et `NumConstraints()` ne sont pas
+disponibles dans la version d'ortools installée). Le score de l'évaluateur
+(`score_evaluateur` dans l'export) utilise les poids 0.25/0.60/0.15.
 
 ### Banc d'essai
 
@@ -189,7 +219,10 @@ test_cpsat.py                  solveur CP-SAT multi-type + 8 tests
 src/generateur_instances.py    générateur (étudiants seuls) + historique
 src/groupes.py                 profils de capacités, pool de groupes, TP/TD
 src/evaluation.py              évaluation post-hoc f1/f2/f3 et contraintes
-src/export_csv.py              export des instances figées en CSV
+src/export_csv.py              résolution + export des trois CSV
+exports/instances.csv          métriques par instance
+exports/etudiants.csv          étudiants + groupes assignés
+exports/resultats_etudiants.csv  état des étudiants après analyse
 src/test_generateur.py         tests du générateur
 src/test_evaluation.py         tests de l'évaluation
 src/test_export.py             tests de l'export

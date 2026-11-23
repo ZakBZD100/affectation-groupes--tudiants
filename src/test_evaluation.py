@@ -96,7 +96,8 @@ def test_f2_et_poids():
     assert r.detail["f2_min"] == 3
     assert r.detail["f2_max"] == 4
     assert r.normalises["f2"] == 0.0
-    assert r.poids["f1"] == 0.5 and r.poids["f2"] == 0.5
+    assert abs(r.poids["f1"] - 0.25 / 0.85) < 1e-9
+    assert abs(r.poids["f2"] - 0.60 / 0.85) < 1e-9
     assert r.score == 1.0
 
     aff4 = {

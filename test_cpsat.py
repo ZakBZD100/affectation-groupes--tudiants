@@ -12,13 +12,14 @@ Le modèle suit la formalisation de la semaine 2 :
     C7  pas de groupe ouvert vide
 
 Le solveur choisit k(t) : aucun nombre de groupes n'est imposé de l'extérieur.
-L'objectif est pondéré (f1 + f2, 50/50 par défaut), avec une normalisation
-entière exacte. Les groupes sont des `groupes.Groupe` (nom, type, capacité,
+L'objectif est pondéré (f1 + f2, 30/70 par défaut : f2 est prioritaire), avec
+une normalisation entière exacte. Les groupes sont des `groupes.Groupe` (nom, type, capacité,
 parent) ; un dict {nom: capacité} reste accepté pour la compatibilité.
 """
 import math
 import os
 import sys
+import time
 from fractions import Fraction
 
 from ortools.sat.python import cp_model
@@ -26,7 +27,7 @@ from ortools.sat.python import cp_model
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "src"))
 from groupes import Groupe, groupes_par_type  # noqa: E402
 
-POIDS_DEFAUT = {"f1": 0.5, "f2": 0.5}
+POIDS_DEFAUT = {"f1": 0.3, "f2": 0.7}
 
 
 # ---------------------------------------------------------------------------
@@ -195,6 +196,54 @@ def _f2_min(blocs, nb, par_nom):
     return total
 
 
+def _f3_multi(s, aff, par_nom, types):
+    """Paires de groupes de types différents partageant un étudiant."""
+    paires = set()
+    for e in s:
+        affectation = aff.get(e, {})
+        if not isinstance(affectation, dict):
+            continue
+        items = sorted(affectation.items())
+        for i in range(len(items)):
+            t1, g1 = items[i]
+            for j in range(i + 1, len(items)):
+                t2, g2 = items[j]
+                if t1 != t2:
+                    paires.add(tuple(sorted(((t1, g1), (t2, g2)))))
+    f3 = float(len(paires))
+    par_type = {
+        t: sum(1 for g in par_nom.values() if g.type == t) for t in types
+    }
+    f3_max = 0
+    for i, t1 in enumerate(types):
+        for t2 in types[i + 1:]:
+            f3_max += par_type[t1] * par_type[t2]
+    return f3, f3_max
+
+
+def _remplissage(eff, ouv, par_nom):
+    """Statistiques sur les groupes ouverts."""
+    tailles = [eff[nom] for nom in ouv]
+    capacites = [par_nom[nom].capacite for nom in ouv]
+    if not tailles:
+        return {
+            "effectif_min": 0,
+            "effectif_max": 0,
+            "effectif_moyen": 0.0,
+            "ecart_type": 0.0,
+            "taux_occupation": 0.0,
+        }
+    moyenne = sum(tailles) / len(tailles)
+    ecart_type = (sum((v - moyenne) ** 2 for v in tailles) / len(tailles)) ** 0.5
+    return {
+        "effectif_min": min(tailles),
+        "effectif_max": max(tailles),
+        "effectif_moyen": round(moyenne, 3),
+        "ecart_type": round(ecart_type, 3),
+        "taux_occupation": round(sum(tailles) / sum(capacites), 4),
+    }
+
+
 def _coefficients(poids, f1_max_int, f2_min, f2_max):
     """Coefficients entiers de l'objectif pondéré f1 + f2.
 
@@ -297,14 +346,15 @@ def bati(s, groupes, a, blocs, nb, k=None, poids=None):
     return m, x, y, n, ec_par_bloc
 
 
-def resoudre(s, groupes, k=None, compat=None, poids=None):
+def resoudre(s, groupes, k=None, compat=None, poids=None, comparer=False):
     """Résout l'affectation multi-type et renvoie (statut, aff, eff, ind).
 
-    s       : {étudiant: LV2}
-    groupes : séquence de `Groupe` (ou dict {nom: capacité})
-    k       : nombre total de groupes ouverts imposé (None = choisi)
-    compat  : {étudiant: [groupes autorisés]} (C3)
-    poids   : {"f1": w1, "f2": w2}, 50/50 par défaut
+    s        : {étudiant: LV2}
+    groupes  : séquence de `Groupe` (ou dict {nom: capacité})
+    k        : nombre total de groupes ouverts imposé (None = choisi)
+    compat   : {étudiant: [groupes autorisés]} (C3)
+    poids    : {"f1": w1, "f2": w2}, 30/70 par défaut (f2 prioritaire)
+    comparer : si True, calcule aussi l'écart de score avec le greedy
     """
     poids = dict(POIDS_DEFAUT, **(poids or {}))
     groupes = _normaliser_groupes(groupes)
@@ -343,7 +393,9 @@ def resoudre(s, groupes, k=None, compat=None, poids=None):
 
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = 10
+    t_solve = time.perf_counter()
     statut = solver.Solve(m)
+    temps_s = time.perf_counter() - t_solve
     if statut not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         return statut, {}, {}, {}
 
@@ -399,8 +451,23 @@ def resoudre(s, groupes, k=None, compat=None, poids=None):
                     break
         aff[e] = affectation
 
-    ouverts = [eff[nom] for nom in noms if ouv[nom]]
+    noms_ouverts = [nom for nom in noms if ouv[nom]]
+    ouverts = [eff[nom] for nom in noms_ouverts]
+    remplissage = _remplissage(eff, noms_ouverts, par_nom)
+    f3, f3_max = _f3_multi(s, aff, par_nom, types)
+    f3_norm = f3 / f3_max if f3_max > 0 else 0.0
+    objectif = solver.ObjectiveValue() if A or B else 0
+    borne = solver.BestObjectiveBound() if A or B else 0
+    ecart = 0.0 if objectif == 0 else abs(objectif - borne) / abs(objectif)
+
     ind = {
+        "statut": solver.StatusName(statut),
+        "temps_s": round(temps_s, 4),
+        "objectif": objectif,
+        "best_bound": borne,
+        "gap": round(ecart, 6),
+        "variables": len(m.Proto().variables),
+        "contraintes": len(m.Proto().constraints),
         "k": k_total,
         "k_par_type": k_par_type,
         "f1": f1_raw,
@@ -410,15 +477,61 @@ def resoudre(s, groupes, k=None, compat=None, poids=None):
         "f2_norm": round(f2_norm, 6),
         "f2_min": f2_min,
         "f2_max": f2_max,
+        "f3": f3,
+        "f3_max": f3_max,
+        "f3_norm": round(f3_norm, 6),
         "maxmin": max(ouverts) - min(ouverts) if ouverts else 0,
         "score": round(score, 6),
+        "ecart_f2_min": k_total - f2_min,
+        "marge_f2": f2_max - f2_min,
+        **remplissage,
         "blocs": [
             {"type": b["type"], "cle": b["cle"], "groupes": list(b["groupes"]),
              "N": nb[i]}
             for i, b in enumerate(blocs)
         ],
     }
+
+    if comparer:
+        from heuristique import greedy
+        from evaluation import evaluer
+
+        aff_g, _ = greedy(s, groupes, compat=compat)
+        r_g = evaluer(s, groupes, aff_g, compat=compat)
+        r_c = evaluer(s, groupes, aff, compat=compat)
+        ind["greedy"] = {
+            "faisable": r_g.faisable,
+            "k": r_g.detail["k"] if r_g.faisable else None,
+            "f1": r_g.criteres["f1"] if r_g.faisable else None,
+            "score": r_g.score,
+        }
+        if r_g.faisable and r_c.faisable:
+            ind["delta_score_greedy"] = round(r_c.score - r_g.score, 6)
+            ind["delta_k_greedy"] = r_c.detail["k"] - r_g.detail["k"]
+        else:
+            ind["delta_score_greedy"] = None
+            ind["delta_k_greedy"] = None
+
     return statut, aff, eff, ind
+
+
+def afficher_metriques(ind):
+    """Affiche un bloc compact de métriques après résolution."""
+    print("  Resolution : %s en %.4fs, objectif=%s, borne=%s, gap=%.3f"
+          % (ind["statut"], ind["temps_s"], ind["objectif"],
+             ind["best_bound"], ind["gap"]))
+    print("  Qualite    : k=%s, f1=%.3f (norm %.3f), f2=%.3f (norm %.3f), "
+          "f3=%.1f (norm %.3f), score=%.3f"
+          % (ind["k"], ind["f1"], ind["f1_norm"], ind["f2"], ind["f2_norm"],
+             ind["f3"], ind["f3_norm"], ind["score"]))
+    print("  Remplissage: min=%d max=%d moy=%.2f ecart-type=%.2f occupation=%.1f%%"
+          % (ind["effectif_min"], ind["effectif_max"], ind["effectif_moyen"],
+             ind["ecart_type"], 100 * ind["taux_occupation"]))
+    print("  Bornes     : f2- f2_min=%+d (marge %d), maxmin=%d"
+          % (ind["ecart_f2_min"], ind["marge_f2"], ind["maxmin"]))
+    if "delta_score_greedy" in ind:
+        print("  vs greedy  : delta score=%s, delta k=%s"
+              % (ind["delta_score_greedy"], ind["delta_k_greedy"]))
 
 
 # ---------------------------------------------------------------------------

@@ -8,7 +8,8 @@ les critères souples du PDF `semaine2_formalisation` :
     f3 : conflits de parallélisation entre types
 
 Chaque critère est normalisé dans [0, 1] entre un minimum et un maximum
-réalistes, puis agrégé avec des poids (uniformes par défaut) :
+réalistes, puis agrégé avec des poids (f1=0.25, f2=0.60, f3=0.15 par défaut :
+f2 est prioritaire) :
 
     score = 1 - somme_c w_c * f~_c  dans [0, 1]   (1 = parfait)
 
@@ -45,7 +46,7 @@ from dataclasses import dataclass
 from math import ceil
 
 CRITERES = ("f1", "f2", "f3")
-POIDS_DEFAUT = {"f1": 1.0 / 3.0, "f2": 1.0 / 3.0, "f3": 1.0 / 3.0}
+POIDS_DEFAUT = {"f1": 0.25, "f2": 0.60, "f3": 0.15}
 BLOC_GLOBAL = "__global__"
 
 
@@ -416,7 +417,7 @@ def _f3(s, aff_multi, par_nom, blocs):
 # Agrégation
 # ---------------------------------------------------------------------------
 def _poids(poids):
-    """Fusionne les poids fournis avec les poids uniformes par défaut."""
+    """Fusionne les poids fournis avec les poids par défaut (f2 prioritaire)."""
     resultat = dict(POIDS_DEFAUT)
     if poids:
         for critere, valeur in poids.items():
@@ -474,7 +475,7 @@ def evaluer(s, groupes, aff, compat=None, blocs=None, poids=None, capacite_max=N
     aff           : {e: {type: groupe}} (multi-type) ou {e: groupe} (mono-type)
     compat        : {étudiant: [groupes autorisés]} (C3) ; None = tous
     blocs         : {nom_groupe: bloc} ; None = inféré depuis les types/compat
-    poids         : {"f1": w1, "f2": w2, "f3": w3}, uniformes par défaut
+    poids         : {"f1": w1, "f2": w2, "f3": w3}, 0.25/0.60/0.15 par défaut
     capacite_max  : Cmax imposé pour f2_min ; None = max des capacités du bloc
 
     Une affectation invalide (C1, C2, C3, C4, C5a) renvoie `faisable=False`,
