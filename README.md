@@ -21,6 +21,52 @@ directement par Excel. Il utilise donc `ortools`, mais ni `pandas`, ni
 `openpyxl`, ni `xlsxwriter` ne sont nécessaires. L'option `--sans-solution`
 permet d'exporter les seules données d'entrée sans lancer le solveur.
 
+## Application graphique (Tkinter)
+
+L'interface de bureau utilise **le vrai solveur CP-SAT** du projet : contrairement
+à une page web statique, Python et `ortools` tournent localement.
+
+```bash
+python app.py
+```
+
+Quatre onglets :
+
+1. **Données** — saisie manuelle d'étudiants, import CSV (`id, lv2, statut,
+   choix_tardif`) ou génération aléatoire reproductible (graine `blake2b`,
+   unitaire / lot / cas extrêmes).
+2. **Paramètres** — poids f1/f2/f3, profil de capacités, timeout, `k` imposé ou
+   libre, marge de groupes, comparaison au greedy.
+3. **Résultats** — métriques du solveur, affectations par étudiant, groupes
+   ouverts et comparaison greedy/CP-SAT ; export des trois CSV et d'un rapport
+   JSON. La résolution tourne dans un thread, l'interface reste responsive.
+4. **Instances pré-calculées** — exploration des 27 instances de `exports/`
+   sans relancer le solveur.
+
+Tests des briques non graphiques :
+
+```bash
+python src/ihm/test_ihm.py
+```
+
+### Executable Windows
+
+```bat
+build.bat
+```
+
+Le script installe PyInstaller si besoin et produit un dossier autonome :
+
+```
+dist\AffectationGroupes\AffectationGroupes.exe
+dist\AffectationGroupes\exports\...       (les 27 instances)
+```
+
+Copiez le **dossier entier** sur la machine cible : aucune installation de
+Python ni d'ortools n'est requise. Le dossier pèse environ 263 Mo : PyInstaller
+doit embarquer les DLL d'ortools/protobuf/absl (et leurs dépendances numpy,
+scipy, pandas) pour que le solveur CP-SAT se charge correctement sous Windows.
+
 ## Commandes et résultats attendus
 
 ### Tests
